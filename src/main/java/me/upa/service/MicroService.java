@@ -1,8 +1,9 @@
 package me.upa.service;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.time.Duration;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * A low-priority service that does not rely on its own thread, with a higher chance of delayed/late execution. This is used to
@@ -11,6 +12,11 @@ import java.util.logging.Logger;
  * @author lare96
  */
 public abstract class MicroService {
+
+    /**
+     * The logger.
+     */
+    private static final Logger logger = LogManager.getLogger();
 
     /**
      * The intended delay between executions.
@@ -41,7 +47,7 @@ public abstract class MicroService {
                 currentDelay = 0;
             }
         } catch (Exception e) {
-            Logger.getGlobal().log(Level.WARNING, "Error running service in INSTANT mode.", e);
+           logger.error("Error running service in INSTANT mode.", e);
         }
     }
 

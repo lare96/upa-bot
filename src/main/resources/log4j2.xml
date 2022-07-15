@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" target="SYSTEM_OUT">
+    <Appenders>
+        <Console name="outconsole" target="SYSTEM_ERR">
+            <LevelRangeFilter minLevel="INFO" maxLevel="ALL" onMatch="ACCEPT" onMismatch="DENY"/>
+            <PatternLayout pattern="%highlight{[%d{dd MMM yyyy, h:mm:ss a}] [%logger{1}] [%t] %n%level: %msg%n}{FATAL=bright red, ERROR=red, WARN=yellow, INFO=normal, DEBUG=normal, TRACE=normal}"/>
+        </Console>
+        <Console name="errconsole" target="SYSTEM_ERR">
+            <LevelRangeFilter minLevel="FATAL" maxLevel="WARN" onMatch="ACCEPT" onMismatch="DENY"/>
+            <PatternLayout pattern="%highlight{[%d{dd MMM yyyy, h:mm:ss a}] [%logger{1}] [%t] %n%level: %msg%n}{FATAL=bright red, ERROR=red, WARN=yellow, INFO=normal, DEBUG=normal, TRACE=normal}"/>
+        </Console>
+        <RandomAccessFile name="errfile" fileName="./data/logs/errors.txt">
+            <LevelRangeFilter minLevel="FATAL" maxLevel="WARN" onMatch="ACCEPT" onMismatch="DENY"/>
+            <PatternLayout pattern="[%d{dd MMM yyyy, h:mm:ss a}] [%logger{1}] [%level] [%t] %msg%n"/>
+        </RandomAccessFile>
+    </Appenders>
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="outconsole"/>
+            <AppenderRef ref="errconsole"/>
+            <AppenderRef ref="errfile"/>
+        </Root>
+    </Loggers>
+</Configuration>
