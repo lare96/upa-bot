@@ -335,7 +335,7 @@ public final class SparkTrainMicroService extends MicroService {
                 throw new IllegalStateException("Could not load next property for build slot.");
             }
             if (property.getFinishedAt() == null) {
-                String msg = "Please start construction of " + request.getStructureName() + " on " + property.getFullAddress() + " to be accepted onto build queue.";
+                String msg = "Please start construction of **" + request.getStructureName() + "** on **" + property.getFullAddress() + "** to be accepted onto the build queue.";
                 if (request.getNotified().compareAndSet(false, true)) {
                     UpaBot.getDiscordService().guild().retrieveMemberById(request.getMemberId()).queue(success -> {
                         success.getUser().openPrivateChannel().queue(privateChannel ->
