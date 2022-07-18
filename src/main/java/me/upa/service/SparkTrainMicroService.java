@@ -160,7 +160,7 @@ public final class SparkTrainMicroService extends MicroService {
     private volatile Instant lastAnnouncement = Instant.now();
 
     public SparkTrainMicroService() {
-        super(Duration.ofMinutes(2));
+        super(Duration.ofMinutes(1));
     }
 
     @Override
@@ -183,7 +183,10 @@ public final class SparkTrainMicroService extends MicroService {
                 long memberId = results.getLong(1);
                 long propertyId = results.getLong(2);
                 String structureName = results.getString(3);
-                buildRequests.put(memberId, new UpaBuildRequest(memberId, propertyId, structureName));
+                String address = UpaBot.getDatabaseCachingService().getProperties().get(propertyId).getAddress();
+                UpaBuildRequest request = new UpaBuildRequest(memberId, propertyId, structureName);
+                request.setAddress(address);
+                buildRequests.put(memberId, request);
             }
         }
         computeLeastRequiredSsh();
@@ -270,6 +273,7 @@ public final class SparkTrainMicroService extends MicroService {
     public int getLeastRequiredSsh() {
         return leastRequiredSsh.getSshRequired();
     }
+
     public Structure getLeastRequiredSshStructure() {
         return leastRequiredSsh;
     }
@@ -333,11 +337,11 @@ public final class SparkTrainMicroService extends MicroService {
             if (property.getFinishedAt() == null) {
                 String msg = "Please start construction of " + request.getStructureName() + " on " + property.getFullAddress() + " to be accepted onto build queue.";
                 if (request.getNotified().compareAndSet(false, true)) {
-                    UpaBot.getDiscordService().guild().retrieveMemberById(request.getMemberId()).queue(success ->
-                            success.getUser().openPrivateChannel().queue(privateChannel ->
-                                    privateChannel.sendMessage(msg).queue()));
-                } else {
-                    UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessage(msg).queue();
+                    UpaBot.getDiscordService().guild().retrieveMemberById(request.getMemberId()).queue(success -> {
+                        success.getUser().openPrivateChannel().queue(privateChannel ->
+                                privateChannel.sendMessage(msg).queue());
+                        UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessage(success.getAsMention() + " " + msg).queue();
+                    });
                 }
                 return false;
             }
@@ -367,10 +371,22 @@ public final class SparkTrainMicroService extends MicroService {
                 if (place == size) {
                     color = Color.GREEN;
                 }
-                long hoursLeft = Instant.now().until(slot.getFinishedAt().get(), ChronoUnit.HOURS);
+                Instant now = Instant.now();
+                long hoursLeft = now.until(slot.getFinishedAt().get(), ChronoUnit.HOURS);
+                long minutesLeft = now.until(slot.getFinishedAt().get(), ChronoUnit.MINUTES);
+                String formatTimeLeft;
                 double daysLeft = hoursLeft / 24.0;
+                if (daysLeft >= 1) {
+                    formatTimeLeft = DECIMAL_FORMAT.format(daysLeft) + " day(s)";
+                } else if (hoursLeft > 0) {
+                    formatTimeLeft = hoursLeft + " hour(s)";
+                } else if (minutesLeft > 0) {
+                    formatTimeLeft = minutesLeft + " minute(s)";
+                } else {
+                    formatTimeLeft = "Under a minute";
+                }
                 embedList.add(new EmbedBuilder().setTitle(getPlaceEmoji(place++).getAsMention() + " " + slot.getAddress()).
-                        addField("Days left", DECIMAL_FORMAT.format(daysLeft), false).
+                        addField("Time left", formatTimeLeft, false).
                         addField("Owner", "<@" + slot.getMemberId() + ">", false).
                         addField("Spark total", slot.getSparkStaked() + "/" + slot.getMaxSparkStaked(), false).
                         addField("Property link", "https://play.upland.me/?prop_id=" + slot.getPropertyId(), false).
@@ -381,7 +397,10 @@ public final class SparkTrainMicroService extends MicroService {
                     retrieveMessageById(992885758581035181L).
                     queue(success -> success.editMessage(new MessageBuilder().append(":zap: :zap: ").
                             append("Where do I stake my spark?", Formatting.BOLD, Formatting.UNDERLINE).
-                            append(" :zap: :zap:").setEmbeds(embedList).setActionRows(ActionRow.of(Button.of(ButtonStyle.PRIMARY, "view_build_requests", "View build requests", Emoji.fromUnicode("U+1F477")))).build()).queue());
+                            append(" :zap: :zap:").setEmbeds(embedList).setActionRows(ActionRow.of(
+                                    Button.of(ButtonStyle.PRIMARY, "manage_build_request", "Manage build request", Emoji.fromUnicode("U+1F3D7")),
+                                    Button.of(ButtonStyle.PRIMARY, "view_build_requests", "View build requests", Emoji.fromUnicode("U+1F477"))
+                            )).build()).queue());
             lastAnnouncement = Instant.now();
         }
     }
