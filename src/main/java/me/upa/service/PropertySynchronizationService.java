@@ -8,6 +8,8 @@ import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.AbstractScheduledService;
 import com.google.common.util.concurrent.Uninterruptibles;
 import me.upa.UpaBot;
+import me.upa.discord.CreditTransaction;
+import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.UpaMember;
 import me.upa.discord.UpaProperty;
 import me.upa.fetcher.DataFetcherManager;
@@ -39,6 +41,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -316,8 +319,10 @@ public class PropertySynchronizationService extends AbstractScheduledService {
             if (newProperties.size() > 0) {
                 logger.info("Processing {} new node properties.", newProperties.size());
 
+                int minted = 0;
                 try (Connection connection = SqlConnectionManager.getInstance().take();
-                     PreparedStatement insertProperty = connection.prepareStatement("INSERT INTO node_properties (member_key, address, property_id, build_status, node, size) VALUES (?, ?, ?, ?, ?, ?);")) {
+                     PreparedStatement insertProperty = connection.prepareStatement("INSERT INTO node_properties (member_key, address, property_id, build_status, node, size) VALUES (?, ?, ?, ?, ?, ?);");
+                     PreparedStatement updateMints = connection.prepareStatement("UPDATE members SET minted = minted + ? WHERE member_id = ?;")) {
                     List<UpaProperty> properties = new ArrayList<>();
                     for (Property property : newProperties) {
                         int key = memberKeys.get(property.getPropId());
@@ -328,6 +333,9 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                         insertProperty.setString(5, "HOLLIS");
                         insertProperty.setInt(6, property.getArea());
                         insertProperty.addBatch();
+                        if(property.isMintedByOwner()) {
+                            minted++;
+                        }
                         properties.add(new UpaProperty(key, property.getFullAddress(), property.getPropId(), property.getBuildStatus(), "HOLLIS", property.getArea(), false));
                     }
                     if (insertProperty.executeBatch().length == newProperties.size()) {
@@ -336,6 +344,13 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                             databaseCaching.getProperties().put(upaProperty.getPropertyId(), upaProperty);
                             upaMember.getTotalUp2().addAndGet(upaProperty.getUp2());
                         }
+                        if(minted > 0) {
+                            upaMember.getMinted().addAndGet(minted);
+                            UpaBot.getDiscordService().sendCredit(new CreditTransaction(upaMember, minted * 200, CreditTransactionType.MINTED, String.valueOf(minted)));
+                        }
+                        updateMints.setInt(1, minted);
+                        updateMints.setLong(2, memberId);
+                        updateMints.executeUpdate();
                     }
                 }
             }

@@ -1,10 +1,12 @@
 package me.upa.service;
 
 import com.fasterxml.jackson.databind.ser.std.StdArraySerializers.IntArraySerializer;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimaps;
 import com.google.common.collect.Multiset;
@@ -12,6 +14,8 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.AbstractIdleService;
 import me.upa.UpaBot;
+import me.upa.discord.DiscordService;
+import me.upa.discord.PacHistoryStatement;
 import me.upa.discord.Scholar;
 import me.upa.discord.SendStormEvent;
 import me.upa.discord.UpaMember;
@@ -89,6 +93,8 @@ public final class DatabaseCachingService extends AbstractIdleService {
      */
     private final Map<Long, UpaPoolProperty> poolProperties = new ConcurrentHashMap<>();
 
+    private final ListMultimap<Long, PacHistoryStatement> pacHistory = Multimaps.synchronizedListMultimap(ArrayListMultimap.create());
+
     @Override
     protected void startUp() throws Exception {
         try (Connection connection = SqlConnectionManager.getInstance().take()) {
@@ -96,7 +102,7 @@ public final class DatabaseCachingService extends AbstractIdleService {
 
             // All linked Discord members.
             Set<Long> memberIds = new HashSet<>();
-            try (PreparedStatement selectMembers = connection.prepareStatement("SELECT `key`, member_id, in_game_name, blockchain_account_id, networth, credit, ssh, sends, sponsored_sends, referrals, claimed_daily_at, sync, join_date FROM members;");
+            try (PreparedStatement selectMembers = connection.prepareStatement("SELECT `key`, member_id, in_game_name, blockchain_account_id, networth, credit, ssh, sends, sponsored_sends, referrals, minted, claimed_daily_at, sync, join_date FROM members;");
                  ResultSet memberResults = selectMembers.executeQuery()) {
                 while (memberResults.next()) {
                     int memberKey = memberResults.getInt(1);
@@ -109,10 +115,11 @@ public final class DatabaseCachingService extends AbstractIdleService {
                     int sends = memberResults.getInt(8);
                     int sponsoredSends = memberResults.getInt(9);
                     int referrals = memberResults.getInt(10);
-                    Instant claimedDailyAt = Instant.parse(memberResults.getString(11));
-                    boolean sync = memberResults.getBoolean(12);
-                    LocalDate joinDate = memberResults.getDate(13).toLocalDate();
-                    var upaMember = new UpaMember(memberKey, memberId, inGameName, "<not_yet_loaded>", blockchainAccountId, netWorth, credit, ssh, sends, sponsoredSends, referrals, claimedDailyAt, sync, joinDate);
+                    int minted = memberResults.getInt(11);
+                    Instant claimedDailyAt = Instant.parse(memberResults.getString(12));
+                    boolean sync = memberResults.getBoolean(13);
+                    LocalDate joinDate = memberResults.getDate(14).toLocalDate();
+                    var upaMember = new UpaMember(memberKey, memberId, inGameName, "<not_yet_loaded>", blockchainAccountId, netWorth, credit, ssh, sends, sponsoredSends, referrals, minted, claimedDailyAt, sync, joinDate);
                     memberIds.add(Long.valueOf(memberId));
                     members.put(memberId, upaMember);
                     memberNames.put(memberId, inGameName);

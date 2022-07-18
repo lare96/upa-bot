@@ -33,8 +33,8 @@ public class FaqButtonListener extends ListenerAdapter {
                         append("1. Ensure that you have the <@&956793551230996502> role\n").
                         append("2. Stake your spark at whichever building has the green card in <#963108957784772659>. You will then receive the <@&965427810707595394> role\n").
                         append("3. Once you have the role, you can View your place in the spark train by going to the <#990518630129221652> channel\n\n").
-                        append("Once you get near the top of the train, you can request a build of your choice using the button in /account! ").
-                        append("As your structure gets built, you will lose SSH which will require you to continue staking in order to get another build.").
+                        append("Once you get near the top of the train, you can request a build of your choice using the 'Manage build request' button in <#963108957784772659>! ").
+                        append("As your structure gets built, you will lose SSH. This means you will have to continue staking and/or earning PAC in order to get another build.").
                         build()).setEphemeral(true).queue();
                 break;
             case "getting_started":

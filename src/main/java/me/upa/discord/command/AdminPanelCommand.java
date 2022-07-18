@@ -1,9 +1,16 @@
 package me.upa.discord.command;
 
+import com.google.common.collect.ConcurrentHashMultiset;
+import com.google.common.collect.Multiset;
 import com.google.common.primitives.Ints;
 import me.upa.UpaBot;
+import me.upa.discord.CreditTransaction;
+import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.Scholar;
 import me.upa.discord.UpaMember;
+import me.upa.discord.UpaProperty;
+import me.upa.fetcher.PropertyDataFetcher;
+import me.upa.game.Property;
 import me.upa.service.DatabaseCachingService;
 import me.upa.sql.SqlConnectionManager;
 import me.upa.sql.SqlTask;
@@ -35,10 +42,16 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public final class AdminPanelCommand extends ListenerAdapter {
 
@@ -102,11 +115,11 @@ public final class AdminPanelCommand extends ListenerAdapter {
         }
     }
 
-   // private final ScheduledExecutorService service = Executors.newSingleThreadScheduledExecutor();
+    // private final ScheduledExecutorService service = Executors.newSingleThreadScheduledExecutor();
     private void gamble(ButtonInteractionEvent event, int amount) {
         boolean won = ThreadLocalRandom.current().nextInt(100) < 35;
         String imageUrl = won ? "https://i.imgur.com/KMJH8yi.pnghttps://i.imgur.com/KMJH8yi.png" : "https://i.imgur.com/tcPHHjn.jpeg";
-        String message = won ? "Congratulations! You have won **"+ (amount * 2) +" PAC** at the slots!" : "Oof, you've lost **"+amount+" PAC** at the slots. Better luck next time.";
+        String message = won ? "Congratulations! You have won **" + (amount * 2) + " PAC** at the slots!" : "Oof, you've lost **" + amount + " PAC** at the slots. Better luck next time.";
 
         event.getInteraction().editMessage(new MessageBuilder().setEmbeds(new EmbedBuilder().setTitle(SLOT_MACHINE_EMOJI.getAsMention()).setImage(imageUrl).setDescription(message).setColor(Color.YELLOW).build()).
                 setActionRows(ActionRow.of(Button.of(ButtonStyle.SUCCESS, "try_again", "Try again", Emoji.fromUnicode("U+2705")))).build()).queue();
@@ -118,12 +131,26 @@ public final class AdminPanelCommand extends ListenerAdapter {
             return;
         switch (event.getButton().getId()) {
             case "test_feature":
-                event.reply("How much PAC would you like to wager? (PAC will not be taken while in TEST mode)\n\n"+
+                Set<Long> members = Set.of(901726930439634975L,
+                        540938577572397059L,
+                        635956007872495617L,
+                        475003272034385930L,
+                        741856765536370728L,
+                        958582971084963840L,
+                        220622659665264643L,
+                        200653175127146501L,
+                        792154216361492560L,
+                        960498550704316437L,
+                        688617191402504219L,
+                        182541980700508160L);
+                UpaBot.getDiscordService().sendCredit(members.stream().map(next -> new CreditTransaction(UpaBot.getDatabaseCachingService().getMembers().get(next), 200, CreditTransactionType.EVENT, "the **Send Storm Event**")).collect(Collectors.toList()));
+                    event.reply("Done").setEphemeral(true).queue();
+                /*    event.reply("How much PAC would you like to wager? (PAC will not be taken while in TEST mode)\n\n"+
                         BLUE_SQUARE_EMOJI.getAsMention()+""+BLUE_SQUARE_EMOJI.getAsMention()+""+BLUE_SQUARE_EMOJI.getAsMention()+" = Win double your PAC!\nAnything else=").addActionRow(
                         Button.of(ButtonStyle.PRIMARY, "wager_100", "Wager 100 PAC", Emoji.fromUnicode("U+1F4B5")),
                         Button.of(ButtonStyle.PRIMARY, "wager_250", "Wager 250 PAC", Emoji.fromUnicode("U+1F4B0")),
                         Button.of(ButtonStyle.PRIMARY, "wager_500", "Wager 500 PAC", Emoji.fromUnicode("U+1F911"))
-                ).setEphemeral(true).queue();
+                ).setEphemeral(true).queue();*/
                 break;
             case "wager_100":
                 gamble(event, 100);
@@ -249,7 +276,7 @@ public final class AdminPanelCommand extends ListenerAdapter {
                 },
                 failure -> {
                     event.getHook().editOriginal("Error adding scholar " + memberId + " to database. Please check console.").queue();
-                    logger.warn(new ParameterizedMessage("Error adding scholar {} to database.", memberId),  failure);
+                    logger.warn(new ParameterizedMessage("Error adding scholar {} to database.", memberId), failure);
                 });
     }
 

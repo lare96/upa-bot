@@ -42,7 +42,7 @@ public class PacLotteryButtonListener extends ListenerAdapter {
             }
 
             event.deferReply(true).queue();
-            UpaBot.getDiscordService().sendCredit(new CreditTransaction(upaMember, -250, CreditTransactionType.REDEEM, "buying a lottery ticket.") {
+            UpaBot.getDiscordService().sendCredit(new CreditTransaction(upaMember, -250, CreditTransactionType.REDEEM, "buying a lottery ticket") {
                 @Override
                 public void onSuccess() {
                     UpaBot.getPacLotteryMicroService().addTicket(event.getMember().getIdLong());

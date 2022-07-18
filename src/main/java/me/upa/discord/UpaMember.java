@@ -30,6 +30,7 @@ public final class UpaMember {
     private final AtomicInteger sponsoredSends = new AtomicInteger();
     private final AtomicInteger referrals = new AtomicInteger();
 
+    private final AtomicInteger minted = new AtomicInteger();
     private final AtomicReference<Instant> claimedDailyAt = new AtomicReference<>();
 
     private final AtomicBoolean sync = new AtomicBoolean();
@@ -37,7 +38,7 @@ public final class UpaMember {
     private final LocalDate joinDate;
 
 
-    public UpaMember(int key, long memberId, String inGameName, String discordName, String blockchainAccountId, int netWorth, int credit, int ssh, int sends, int sponsoredSends, int referrals, Instant claimedDailyAt, boolean sync, LocalDate joinDate) {
+    public UpaMember(int key, long memberId, String inGameName, String discordName, String blockchainAccountId, int netWorth, int credit, int ssh, int sends, int sponsoredSends, int referrals, int minted, Instant claimedDailyAt, boolean sync, LocalDate joinDate) {
         this.key = key;
         this.memberId = memberId;
         this.inGameName = inGameName;
@@ -49,10 +50,10 @@ public final class UpaMember {
         this.sends.set(sends);
         this.sponsoredSends.set(sponsoredSends);
         this.referrals.set(referrals);
+        this.minted.set(minted);
         this.claimedDailyAt.set(claimedDailyAt);
         this.sync.set(sync);
         this.joinDate = joinDate;
-
         pacHistoryKey = Paths.get(memberId + ".bin");
     }
 
@@ -119,6 +120,10 @@ public final class UpaMember {
 
     public AtomicInteger getReferrals() {
         return referrals;
+    }
+
+    public AtomicInteger getMinted() {
+        return minted;
     }
 
     public AtomicReference<Instant> getClaimedDailyAt() {

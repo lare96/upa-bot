@@ -10,6 +10,7 @@ import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.MessageBuilder;
 import net.dv8tion.jda.api.entities.Emoji;
 import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.UserSnowflake;
 import net.dv8tion.jda.api.interactions.components.ActionRow;
@@ -42,6 +43,7 @@ public final class PacLotteryMicroService extends MicroService {
         sendMessage();
     }
 
+    //private static final Emoji
     @Override
     public void run() throws Exception {
         UpaBot.variables().lottery().accessValue(currentLottery -> {
@@ -57,7 +59,13 @@ public final class PacLotteryMicroService extends MicroService {
                     currentLottery.getContestants().remove(winnerId);
                     return false;
                 }
-                UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessage("Congratulations to <@"+winnerId+"> for winning the lottery!").queue();
+                StringBuilder sb = new StringBuilder();
+                currentLottery.getContestants().forEach(next -> sb.append("<@").append(next).append("> "));
+                UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessageEmbeds(new EmbedBuilder().
+                        setDescription("Congratulations to <@"+winnerId+"> for winning the lottery! Buy your tickets for the next one at <#993201967096660069>").
+                        addField("Pot", "**"+jackpot+" PAC**", false).
+                        addField("Contestants", sb.toString(), false).
+                        setColor(Color.YELLOW).build()).queue();
                 UpaBot.getDiscordService().sendCredit(new CreditTransaction(upaMember, jackpot, CreditTransactionType.LOTTERY));
                 currentLottery.getContestants().clear();
                 currentLottery.getLastWinner().set(winnerId);

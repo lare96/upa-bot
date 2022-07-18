@@ -145,10 +145,6 @@ public final class ScholarshipCommand extends ListenerAdapter {
     @Override
     public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
         if (event.getName().equals("scholarships")) {
-            if (DiscordService.THROTTLER.needsThrottling(event.getMember().getIdLong())) {
-                event.reply("Please wait before using commands again.").setEphemeral(true).queue();
-                return;
-            }
             event.reply("Select an action.").setEphemeral(true).addActionRow(
                     becomeAScholarButton(),
                     Button.of(ButtonStyle.PRIMARY, "view_scholar_list", "View scholar list", Emoji.fromUnicode("U+1F4CB")),

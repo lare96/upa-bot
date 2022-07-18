@@ -12,6 +12,10 @@ public final class Property {
     private final String buildStatus;
     private final int price;
 
+    private final String transactionId;
+
+    private final String lastTransactionId;
+
     private final int mintPrice;
     private double[][] coordinates;
     private final String ownerUsername;
@@ -23,7 +27,10 @@ public final class Property {
     private final int maxStakedSpark;
     private final Instant finishedAt;
 
-    public Property(long propId, int cityId, String fullAddress, int area, String status, String buildStatus, double buildPercentage, int price, int mintPrice, double[][] coordinates, String ownerUsername, String owner, double stakedSpark, int totalSparksRequired, double progressInSpark, int maxStakedSpark, Instant finishedAt) {
+    public Property(long propId, int cityId, String fullAddress, int area, String status, String buildStatus, double buildPercentage,
+                    int price, String transactionId, String lastTransactionId, int mintPrice, double[][] coordinates,
+                    String ownerUsername, String owner, double stakedSpark, int totalSparksRequired, double progressInSpark,
+                    int maxStakedSpark, Instant finishedAt) {
         this.propId = propId;
         this.cityId = cityId;
         this.fullAddress = fullAddress;
@@ -32,6 +39,8 @@ public final class Property {
         this.buildStatus = buildStatus;
         this.buildPercentage = buildPercentage;
         this.price = price;
+        this.transactionId = transactionId;
+        this.lastTransactionId = lastTransactionId;
         this.mintPrice = mintPrice;
         this.coordinates = coordinates;
         this.ownerUsername = ownerUsername;
@@ -103,6 +112,9 @@ public final class Property {
         return progressInSpark;
     }
 
+    public boolean isMintedByOwner() {
+        return transactionId.equals(lastTransactionId);
+    }
     public int getMaxStakedSpark() {
         return maxStakedSpark;
     }

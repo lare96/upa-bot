@@ -259,7 +259,7 @@ public final class PacCommands extends ListenerAdapter {
             }
             UpaBot.getDiscordService().sendBotRequestsMsg(upaMember, "purchasing **" + upaProperty.getDescriptiveAddress() + "** for **" + upaProperty.getCost() + " PAC**",
                     msg -> {
-                        event.getHook().setEphemeral(true).editOriginal("Your request to trade **" +
+                        event.getInteraction().editMessage("Your request to trade **" +
                                 upaProperty.getDescriptiveAddress() + "** for PAC was sent to the UPA team. You'll hear from us shortly!").queue();
                         UpaBot.variables().storeRequests().accessValue(storeRequests -> storeRequests.putIfAbsent(msg.getIdLong(), new UpaStoreRequest(event.getMember().getIdLong(), msg.getIdLong(), -propertyId, "redeeming " + upaProperty.getDescriptiveAddress(), RequestType.PROPERTY)) == null);
                     });
@@ -510,7 +510,7 @@ public final class PacCommands extends ListenerAdapter {
                                     }, result -> {
                                         try {
                                             CreditTransactionType type = givePac < 0 ? CreditTransactionType.REDEEM : CreditTransactionType.PURCHASE;
-                                            String reason = redeem ? finalProperty.getFullAddress() + " from the UPA pool" : "offering " + finalProperty.getFullAddress() + " to the UPA pool";
+                                            String reason = redeem ? "purchasing **"+ finalProperty.getFullAddress() + "** from the UPA pool" : "offering **" + finalProperty.getFullAddress() + "** to the UPA pool";
                                             UpaBot.getDiscordService().sendCredit(new CreditTransaction(upaMember, (int) Math.floor(givePac), type, reason) {
                                                 @Override
                                                 public void onSuccess() {
@@ -734,6 +734,7 @@ public final class PacCommands extends ListenerAdapter {
                     return;
                 }
                 String formattedAmt = "**" + DiscordService.COMMA_FORMAT.format(amount) + " UPX**";
+                event.deferReply(true).queue();
                 UpaBot.getDiscordService().sendBotRequestsMsg(requester, "redeeming " + formattedAmt,
                         msg -> {
                             UpaBot.variables().storeRequests().access(storeRequests -> storeRequests.get().putIfAbsent(msg.getIdLong(), new UpaStoreRequest(requester.getMemberId(), msg.getIdLong(), -cost, "**" + amount + " UPX**", RequestType.PAC)) == null);
@@ -761,6 +762,7 @@ public final class PacCommands extends ListenerAdapter {
                     event.reply("Invalid pool property link selected.").setEphemeral(true).queue();
                     return;
                 }
+                event.deferReply(true).queue();
                 UpaBot.getDiscordService().sendBotRequestsMsg(propertyFor, "redeeming " + poolProperty.getAddress() + " from the UPA pool",
                         msg -> {
                             UpaBot.variables().storeRequests().access(storeRequests -> storeRequests.get().putIfAbsent(msg.getIdLong(), new UpaStoreRequest(propertyFor.getMemberId(), msg.getIdLong(), -poolProperty.getPropertyId(), poolProperty.getAddress() + " from the UPA pool", RequestType.PROPERTY)) == null);
@@ -820,11 +822,10 @@ public final class PacCommands extends ListenerAdapter {
             return;
         }
         event.reply("Please select which reward you are interested in **redeeming** below.").setEphemeral(true).addActionRow(
-                Button.of(ButtonStyle.PRIMARY, "redeem_for_upx", "I want UPX", Emoji.fromEmote("upx", 987836478455431188L, true)),
-                Button.of(ButtonStyle.PRIMARY, "redeem_for_ssh", "I want spark hours (SSH)", Emoji.fromUnicode("U+26A1")),
-                Button.of(ButtonStyle.PRIMARY, "redeem_for_property", "I want a property", Emoji.fromUnicode("U+1F3E0")),
-                Button.of(ButtonStyle.PRIMARY, "redeem_for_th_map", "I want a custom TH map", Emoji.fromUnicode("U+1F5FA")),
-                Button.of(ButtonStyle.PRIMARY, "redeem_for_analysis", "I want a portfolio analysis", Emoji.fromUnicode("U+1F4C8"))
+                Button.of(ButtonStyle.PRIMARY, "redeem_for_upx", "UPX", Emoji.fromEmote("upx", 987836478455431188L, true)),
+                Button.of(ButtonStyle.PRIMARY, "redeem_for_ssh", "Spark share hours (SSH)", Emoji.fromUnicode("U+26A1")),
+                Button.of(ButtonStyle.PRIMARY, "redeem_for_property", "Properties", Emoji.fromUnicode("U+1F3E0")),
+                Button.of(ButtonStyle.PRIMARY, "redeem_for_th_map", "Treasure hunting map overlay", Emoji.fromUnicode("U+1F5FA"))
         ).queue();
     }
 
@@ -881,10 +882,6 @@ public final class PacCommands extends ListenerAdapter {
 
     private void handleDailyCommand(SlashCommandInteractionEvent event) {
         long memberId = event.getMember().getIdLong();
-        if (DiscordService.THROTTLER.needsThrottling(memberId)) {
-            event.reply("Please wait before using this again.").setEphemeral(true).queue();
-            return;
-        }
         event.deferReply().setEphemeral(true).queue();
         UpaMember upaMember = UpaBot.getDatabaseCachingService().getMembers().get(memberId);
         if (upaMember == null) {

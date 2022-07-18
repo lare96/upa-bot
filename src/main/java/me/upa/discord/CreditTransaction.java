@@ -1,5 +1,6 @@
 package me.upa.discord;
 
+import com.google.common.primitives.Ints;
 import net.dv8tion.jda.api.entities.Emoji;
 
 public class CreditTransaction {
@@ -13,11 +14,11 @@ public class CreditTransaction {
         DAILY("**<username>** claimed a dividend of **<amount> PAC**."),
         EVENT("**<username>** claimed **<amount> PAC** for participating in <reason>."),
         GIFTED("SYSTEM: **<username>** received **<amount> PAC**. Reason: **<reason>**"),
-
+        MINTED("**<username>** received **<amount> PAC** for minting <mint>."),
         OTHER("**<username>** received **<amount> PAC**. Reason: **<reason>**"),
-        REFERRAL("**<username>** received **<amount> PAC** for a referral. **Total referrals: <referral_amount>**."),
+        REFERRAL("**<username>** received **<amount> PAC** for referrals. **Total referrals: <referral_amount>**."),
         TRANSFER("**<username>** sent **<amount> PAC** to <other_username>. Reason: **<reason>**"),
-        LOTTERY("**<username> received **<amount> PAC** for winning the lottery!"),
+        LOTTERY("**<username>** received **<amount> PAC** for winning the lottery!"),
         TIP("**<username>** tipped **<other_username>** **<amount> PAC**! " + Emoji.fromUnicode("U+1F37B").getAsMention());
 
         private final String message;
@@ -68,7 +69,17 @@ public class CreditTransaction {
         String formattedReason = originalMessage.replace("<username>", "<@" + upaMember.getMemberId() + ">").replace("<amount>", amount < 0 ? DiscordService.COMMA_FORMAT.format(Math.abs(amount)) :
                 DiscordService.COMMA_FORMAT.format(amount));
         if (transactionType == CreditTransactionType.REFERRAL) {
-            formattedReason = transactionType.getMessage().replace("<total_referrals>", DiscordService.COMMA_FORMAT.format(upaMember.getReferrals().get()));
+            formattedReason = formattedReason.replace("<referral_amount>", DiscordService.COMMA_FORMAT.format(upaMember.getReferrals().get()));
+        }
+        if(transactionType == CreditTransactionType.MINTED) {
+            int mintAmount = Ints.tryParse(reason);
+            String msg;
+            if(mintAmount > 1) {
+                msg = mintAmount + " node properties";
+            } else {
+                msg = "a node property";
+            }
+            formattedReason = formattedReason.replace("<mint>", msg);
         }
         if (reason != null) {
             formattedReason = formattedReason.replace("<reason>", reason);
@@ -79,5 +90,9 @@ public class CreditTransaction {
 
     public UpaMember getUpaMember() {
         return upaMember;
+    }
+
+    public String getMessage() {
+        return message;
     }
 }

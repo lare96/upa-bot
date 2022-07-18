@@ -2,18 +2,21 @@ package me.upa.discord;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
+import org.checkerframework.checker.units.qual.A;
 
 import java.io.Serializable;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-public final class UpaBuildRequest implements Serializable {
+public final class UpaBuildRequest {
 
-    private static final long serialVersionUID = -4138812405341941388L;
     private final long memberId;
     private final long propertyId;
     private final String structureName;
 
     private final AtomicBoolean notified = new AtomicBoolean();
+
+    private final transient AtomicReference<String> address = new AtomicReference<>();
 
     public UpaBuildRequest(long memberId, long propertyId, String structureName) {
         this.memberId = memberId;
@@ -53,5 +56,13 @@ public final class UpaBuildRequest implements Serializable {
 
     public AtomicBoolean getNotified() {
         return notified;
+    }
+
+    public void setAddress(String newAddress) {
+        address.compareAndSet(null, newAddress);
+    }
+
+    public String getAddress() {
+        return address.get();
     }
 }

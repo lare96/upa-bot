@@ -16,6 +16,7 @@ import java.util.function.Consumer;
 
 public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
     private static final Logger logger = LogManager.getLogger();
+
     public static Property fetchPropertySynchronous(long propertyId) throws Exception {
         PropertyDataFetcher propertyFetcher = new PropertyDataFetcher();
         propertyFetcher.fetch("https://api.upland.me/properties/" + propertyId);
@@ -30,7 +31,7 @@ public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
 
     public static void fetchProperty(long propertyId, Consumer<Property> success) {
         fetchProperty(propertyId, success, t ->
-             logger.warn("Error fetching property data.", t));
+                logger.warn("Error fetching property data.", t));
     }
 
     public static void fetchProperty(long propertyId, Consumer<Property> success, Consumer<Throwable> failure) {
@@ -67,6 +68,8 @@ public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
             int area = data.get("area").getAsInt();
             String status = data.get("status").getAsString();
             JsonElement buildingData = data.get("building");
+            String transactionId = data.get("transaction_id").getAsString();
+            String lastTransactionId = data.get("last_transaction_id").getAsString();
             int price = data.get("price").getAsInt();
             double yieldPerHour = data.get("yield_per_hour").getAsDouble();
             int mintPrice = (int) Math.floor((yieldPerHour * 24 * 30) * 82.671);
@@ -144,10 +147,10 @@ public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
                     throw new IllegalStateException("Invalid build status.");
                 }
             }
-            property = new Property(propId, cityId, fullAddress, area, status, buildStatus, buildPercentage, price, mintPrice, coordinates.toArray(new double[coordinates.size()][2]), ownerUsername, owner, stakedSpark, totalSparksRequired, progressInSpark, maxStakedSpark, finishedAt);
+            property = new Property(propId, cityId, fullAddress, area, status, buildStatus, buildPercentage, price, transactionId, lastTransactionId,  mintPrice, coordinates.toArray(new double[coordinates.size()][2]), ownerUsername, owner, stakedSpark, totalSparksRequired, progressInSpark, maxStakedSpark, finishedAt);
         } catch (Exception e) {
             property = null;
-           logger.error(new ParameterizedMessage("Error reading property data for [{}]", link), e);
+            logger.error(new ParameterizedMessage("Error reading property data for [{}]", link), e);
         }
 
     }

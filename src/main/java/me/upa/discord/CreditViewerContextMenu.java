@@ -43,7 +43,7 @@ public final class CreditViewerContextMenu extends ListenerAdapter {
             return;
         }
         switch (event.getName()) {
-            case "Give PAC":
+            case "Give PAC [Admin]":
                 event.replyModal(getCreditModal("give", "Give PAC")).
                         queue(success -> upaMember.getPendingTransactionTarget().set(event.getTargetMember()));
                 break;

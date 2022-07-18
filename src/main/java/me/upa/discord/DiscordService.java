@@ -2,7 +2,6 @@ package me.upa.discord;
 
 import com.google.common.util.concurrent.AbstractIdleService;
 import me.upa.discord.command.AdminPanelCommand;
-import me.upa.util.Throttler;
 import me.upa.UpaBot;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.command.AccountCommands;
@@ -62,11 +61,6 @@ import static java.util.Objects.requireNonNull;
 public final class DiscordService extends AbstractIdleService {
 
     private static final Logger logger = LogManager.getLogger();
-
-    /**
-     * The slash command throttler.
-     */
-    public static final Throttler THROTTLER = new Throttler();
 
     /**
      * The pool for asynchronous commands.
@@ -136,7 +130,7 @@ public final class DiscordService extends AbstractIdleService {
     @Override
     protected void startUp() throws Exception {
         bot = JDABuilder.createDefault("OTU2ODcxNjc5NTg0NDAzNTI2.Yj2iMg.jCRKAe8o6u1XppSbS4uV_eJRPxI").enableIntents(GatewayIntent.GUILD_WEBHOOKS).
-                addEventListeners(sparkTrain, inviteTracker, scholarshipCommand, new RulesButtonListener(), new FaqButtonListener(), new AdminPanelCommand(),
+                addEventListeners(sparkTrain, inviteTracker, scholarshipCommand, new RulesButtonListener(), new ReferralMessageListener(), new FaqButtonListener(), new AdminPanelCommand(),
                         new CreditViewerContextMenu(), new PacLotteryButtonListener(), new AdminCommands(), new AccountCommands(),
                         new EventCommands(), new PacCommands(), statisticsCommand).build().awaitReady();
     }
@@ -269,6 +263,9 @@ public final class DiscordService extends AbstractIdleService {
             public Void execute(Connection connection) throws Exception {
                 try (PreparedStatement updateCredits = connection.prepareStatement("UPDATE members SET credit = credit + ? WHERE member_id = ?;")) {
                     for (CreditTransaction next : transactions) {
+                        if(next.getAmount() == 0) {
+                            continue;
+                        }
                         updateCredits.setInt(1, next.getAmount());
                         updateCredits.setLong(2, next.getUpaMember().getMemberId());
                         updateCredits.addBatch();
@@ -293,6 +290,9 @@ public final class DiscordService extends AbstractIdleService {
     }
 
     public void sendCredit(CreditTransaction transaction) {
+        if(transaction.getAmount() == 0) {
+            return;
+        }
         sendCredit(List.of(transaction));
     }
 

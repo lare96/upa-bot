@@ -75,7 +75,7 @@ public final class MemberVerificationMicroService extends MicroService {
                     }
                 }
                 connection.commit();
-                return new UpaMember(memberKey, memberId, inGameName, UpaBot.getDiscordService().guild().retrieveMemberById(memberId).complete().getEffectiveName(), blockchainAccountId, 0, 0, 0, 0, 0, 0, claimedDailyAt, false, now);
+                return new UpaMember(memberKey, memberId, inGameName, UpaBot.getDiscordService().guild().retrieveMemberById(memberId).complete().getEffectiveName(), blockchainAccountId, 0, 0, 0, 0, 0, 0, 0, claimedDailyAt, false, now);
             } finally {
                 connection.setAutoCommit(true);
             }

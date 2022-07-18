@@ -1,9 +1,5 @@
 package me.upa.variable;
 
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Multimaps;
-import me.upa.discord.PacHistoryService.PacHistoryStatement;
 import me.upa.discord.UpaLottery;
 import me.upa.discord.UpaStoreRequest;
 
@@ -53,10 +49,6 @@ public final class SystemVariableRepository {
 
     private final SystemVariable<Map<Long, Instant>> slots = SystemVariable.of(new ConcurrentHashMap<>(), "slots");
 
-    private final SystemVariable<ListMultimap<Long, PacHistoryStatement>> creditHistory =
-            SystemVariable.of(Multimaps.synchronizedListMultimap(ArrayListMultimap.create()), "creditHistory");
-
-
     public SystemVariable<Instant> lastDailyReset() {
         return lastDailyReset;
     }
@@ -71,10 +63,6 @@ public final class SystemVariableRepository {
 
     public SystemVariable<Map<Long, Instant>> slots() {
         return slots;
-    }
-
-    public SystemVariable<ListMultimap<Long, PacHistoryStatement>> creditHistory() {
-        return creditHistory;
     }
 
     private SystemVariableRepository loadVariables() {
