@@ -3,6 +3,7 @@ package me.upa.service;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.UpaMember;
 import me.upa.discord.UpaProperty;
 
@@ -14,8 +15,11 @@ import java.util.Map;
 
 public final class DailyResetMicroService extends MicroService {
 
-    public DailyResetMicroService() {
+    private final UpaBotContext ctx;
+
+    public DailyResetMicroService(UpaBotContext ctx) {
         super(Duration.ofMinutes(5));
+        this.ctx = ctx;
     }
 
     @Override
@@ -25,8 +29,7 @@ public final class DailyResetMicroService extends MicroService {
 
     @Override
     public void run() throws Exception {
-        UpaBot.variables().lastDailyReset().access(lastDailyReset -> {
-            // TODO compare and set with retry loop for thread safety
+        ctx.variables().lastDailyReset().access(lastDailyReset -> {
             Instant old = lastDailyReset.get();
             Instant next = wait(old);
             if (!Instant.now().isAfter(next)) {

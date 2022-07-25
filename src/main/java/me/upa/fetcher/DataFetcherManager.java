@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 /**
  * Stores all fetched data from UPXLand.
@@ -86,6 +87,11 @@ public final class DataFetcherManager {
         if (neighborhoodMap == null)
             return -1;
         return neighborhoodMap.values().stream().filter(next -> next.getName().equalsIgnoreCase(name)).mapToInt(Neighborhood::getId).findFirst().orElse(-1);
+    }
+    public static List<Neighborhood> getNeighborhoods(int cityId) {
+        if (neighborhoodMap == null)
+            return List.of();
+        return neighborhoodMap.values().stream().filter(next -> next.getCityId() == cityId).collect(Collectors.toList());
     }
 
     // Getters and setters.

@@ -102,7 +102,7 @@ public abstract class ApiDataFetcher<T> extends DataFetcher {
                                 "accept", "application/json")
                         .build();
             }
-            logger.info("API request {}", link);
+            logger.debug("API request {}", link);
             task = client.sendAsync(request, BodyHandlers.ofString()).
                     handleAsync((response, throwable) -> {
                         if (throwable != null) {

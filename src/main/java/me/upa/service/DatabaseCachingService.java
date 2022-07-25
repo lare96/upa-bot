@@ -14,6 +14,7 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.AbstractIdleService;
 import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.DiscordService;
 import me.upa.discord.PacHistoryStatement;
 import me.upa.discord.Scholar;
@@ -21,6 +22,7 @@ import me.upa.discord.SendStormEvent;
 import me.upa.discord.UpaMember;
 import me.upa.discord.UpaPoolProperty;
 import me.upa.discord.UpaProperty;
+import me.upa.game.CachedProperty;
 import me.upa.sql.SqlConnectionManager;
 import net.dv8tion.jda.api.entities.Invite;
 import net.dv8tion.jda.api.entities.Member;
@@ -28,6 +30,10 @@ import net.dv8tion.jda.api.utils.concurrent.Task;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import javax.xml.crypto.Data;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -40,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Caches basic static member and property data.
@@ -52,6 +59,8 @@ public final class DatabaseCachingService extends AbstractIdleService {
      * The logger.
      */
     private static final Logger logger = LogManager.getLogger();
+
+    private final UpaBotContext ctx;
 
     /**
      * The cached members (member_id -> UpaMember).
@@ -81,7 +90,7 @@ public final class DatabaseCachingService extends AbstractIdleService {
     /**
      * The cached lookup properties.
      */
-    private final Set<Long> propertyLookup = ConcurrentHashMap.newKeySet(10_000);
+    private final Map<Long, CachedProperty> propertyLookup = new ConcurrentHashMap<>();
 
     /**
      * The cached property construction status (address -> build status).
@@ -93,8 +102,16 @@ public final class DatabaseCachingService extends AbstractIdleService {
      */
     private final Map<Long, UpaPoolProperty> poolProperties = new ConcurrentHashMap<>();
 
+    /**
+     * The total PAC in circulation.
+     */
+    private final AtomicLong totalPac = new AtomicLong();
+
     private final ListMultimap<Long, PacHistoryStatement> pacHistory = Multimaps.synchronizedListMultimap(ArrayListMultimap.create());
 
+    public DatabaseCachingService(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
     @Override
     protected void startUp() throws Exception {
         try (Connection connection = SqlConnectionManager.getInstance().take()) {
@@ -127,7 +144,7 @@ public final class DatabaseCachingService extends AbstractIdleService {
                 }
             }
             // Cache discord names.
-            Task<List<Member>> retrieveMembersTask = UpaBot.getDiscordService().guild().retrieveMembersByIds(memberIds);
+            Task<List<Member>> retrieveMembersTask = ctx.discord().guild().retrieveMembersByIds(memberIds);
             List<Member> discordUpaMembers = retrieveMembersTask.get(); // TODO async, don't block db
             for (Member nextMember : discordUpaMembers) {
                 UpaMember upaMember = members.get(nextMember.getIdLong());
@@ -139,6 +156,8 @@ public final class DatabaseCachingService extends AbstractIdleService {
             for (UpaMember upaMember : members.values()) {
                 if (upaMember.getDiscordName().get().equals("<not_yet_loaded>")) {
                     unlink.add(upaMember);
+                } else {
+                    totalPac.addAndGet(upaMember.getCredit().get());
                 }
             }
             if (unlink.size() > 0) {
@@ -198,12 +217,18 @@ public final class DatabaseCachingService extends AbstractIdleService {
             logger.info("Loaded {} scholars.", scholars.size());
 
             // All property lookups.
-            try (PreparedStatement selectProperties = connection.prepareStatement("SELECT property_id FROM property_lookup;");
+            try (PreparedStatement selectProperties = connection.prepareStatement("SELECT property_id, address, area, neighborhood_id, city_id FROM property_lookup;");
                  ResultSet propertyLookupResults = selectProperties.executeQuery()) {
                 while (propertyLookupResults.next()) {
-                    propertyLookup.add(propertyLookupResults.getLong(1));
+                    long propertyId = propertyLookupResults.getLong(1);
+                    String address = propertyLookupResults.getString(2);
+                    int area = propertyLookupResults.getInt(3);
+                    int neighborhoodId = propertyLookupResults.getInt(4);
+                    int cityId = propertyLookupResults.getInt(5);
+                    propertyLookup.put(propertyId, new CachedProperty(propertyId, address, area, neighborhoodId, cityId));
                 }
             }
+            logger.info("Loaded {} property lookups.", propertyLookup.size());
 
             try (PreparedStatement selectPoolProperties = connection.prepareStatement("SELECT * FROM pool_properties;");
                  ResultSet poolPropertyResults = selectPoolProperties.executeQuery()) {
@@ -222,7 +247,6 @@ public final class DatabaseCachingService extends AbstractIdleService {
                 }
             }
         }
-        logger.info("Loaded {} property lookups.", propertyLookup.size());
     }
 
     @Override
@@ -256,7 +280,7 @@ public final class DatabaseCachingService extends AbstractIdleService {
         return scholars;
     }
 
-    public Set<Long> getPropertyLookup() {
+    public Map<Long, CachedProperty> getPropertyLookup() {
         return propertyLookup;
     }
 
@@ -266,5 +290,9 @@ public final class DatabaseCachingService extends AbstractIdleService {
 
     public Map<Long, UpaPoolProperty> getPoolProperties() {
         return poolProperties;
+    }
+
+    public AtomicLong getTotalPac() {
+        return totalPac;
     }
 }

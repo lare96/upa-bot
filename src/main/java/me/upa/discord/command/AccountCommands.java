@@ -1,47 +1,32 @@
 package me.upa.discord.command;
 
-import com.google.common.primitives.Longs;
 import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.DiscordService;
-import me.upa.discord.UpaBuildRequest;
 import me.upa.discord.UpaLottery;
 import me.upa.discord.UpaMember;
-import me.upa.discord.UpaProperty;
-import me.upa.game.Structure;
 import me.upa.service.DatabaseCachingService;
-import me.upa.service.SparkTrainMicroService;
-import me.upa.sql.SqlConnectionManager;
-import me.upa.sql.SqlTask;
 import net.dv8tion.jda.api.entities.Emoji;
-import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
-import net.dv8tion.jda.api.events.interaction.component.SelectMenuInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.components.Modal;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.interactions.components.buttons.ButtonStyle;
-import net.dv8tion.jda.api.interactions.components.selections.SelectMenu;
-import net.dv8tion.jda.api.interactions.components.selections.SelectMenu.Builder;
 import net.dv8tion.jda.api.interactions.components.text.TextInput;
 import net.dv8tion.jda.api.interactions.components.text.TextInputStyle;
-import net.dv8tion.jda.api.requests.restaction.interactions.ReplyCallbackAction;
 import org.jetbrains.annotations.NotNull;
-
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 public class AccountCommands extends ListenerAdapter {
 
+    private final UpaBotContext ctx;
+
+    public AccountCommands(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
 
 
     @Override
@@ -65,10 +50,6 @@ public class AccountCommands extends ListenerAdapter {
                                 setRequired(true).setPlaceholder("I love everything about this server, especially that dapper g.o.a.t! How is he so rich?").build()).
                         build()).queue();
                 break;*/
-            case "pac_store":
-                PacCommands.openStore(event);
-                event.editButton(event.getButton().asDisabled()).queue();
-                break;
             case "mark_acknowledged":
                 if (event.getTextChannel().getIdLong() == 984551707176480778L && event.getMember() != null && !event.getMember().getUser().isBot()) {
                     Message success = event.getMessage();
@@ -97,22 +78,22 @@ public class AccountCommands extends ListenerAdapter {
                 String description = event.getValue("report_a_bug_form_description").getAsString();
                 Member requester = event.getMember();
                 if (requester != null) {
-                    UpaMember upaMember = UpaBot.getDatabaseCachingService().getMembers().get(requester.getIdLong());
+                    UpaMember upaMember = ctx.databaseCaching().getMembers().get(requester.getIdLong());
                     if (upaMember != null)
-                        UpaBot.getDiscordService().sendFeedbackOrBugMsg(upaMember, subject, description,
+                        ctx.discord().sendFeedbackOrBugMsg(upaMember, subject, description,
                                 msg -> event.getHook().setEphemeral(true).editOriginal("Your feedback has been sent to the UPA team. If we find it useful we will award you with PAC!").queue());
                 }
                 break;*/
             case "link_form":
                 String inGameName = event.getValue("link_form_ign").getAsString();
-                LinkCommand.handleLinkCommand(event, inGameName, -1L);
+                LinkCommand.handleLinkCommand(ctx, event, inGameName, -1L);
                 break;
         }
     }
 
     private void handleOverviewCommand(SlashCommandInteractionEvent event) {
-        Role lotteryRole = UpaBot.getDiscordService().guild().getRoleById(983750455429570620L);
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        Role lotteryRole = ctx.discord().guild().getRoleById(983750455429570620L);
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         long memberId = event.getMember().getIdLong();
 
         UpaMember upaMember = databaseCaching.getMembers().get(memberId);
@@ -126,8 +107,8 @@ public class AccountCommands extends ListenerAdapter {
 
         String notification = null;
 
-        if(event.getMember().getRoles().contains(lotteryRole) && !UpaBot.getPacLotteryMicroService().hasTicket(memberId)) {
-            UpaLottery lottery = UpaBot.variables().lottery().getValue();
+        if(event.getMember().getRoles().contains(lotteryRole) && !ctx.lottery().hasTicket(memberId)) {
+            UpaLottery lottery = ctx.variables().lottery().getValue();
             notification = "A lottery with a total pot of **"+lottery.getPac().get()+" PAC** is ongoing, buy a ticket @ <#993201967096660069>!";
         }
         var sb = new StringBuilder(notification != null ? notification : "");
@@ -142,7 +123,7 @@ public class AccountCommands extends ListenerAdapter {
         sb.append("Properties owned: ").append(propertiesOwned).append('\n');
         sb.append("Total UP2: ").append(DiscordService.COMMA_FORMAT.format(upaMember.getTotalUp2().get())).append('\n');
         int rank = 1;
-        for (var next : UpaBot.getDiscordService().getStatisticsCommand().getStatisticsData().getTopOwners().entrySet()) {
+        for (var next : ctx.discord().getStatisticsCommand().getStatisticsData().getTopOwners().entrySet()) {
             if (memberId == next.getKey()) {
                 break;
             }
@@ -154,7 +135,7 @@ public class AccountCommands extends ListenerAdapter {
         sb.append("Sends: ").append(upaMember.getSends().get()).append("\n");
         sb.append("Sponsored sends: ").append(upaMember.getSponsoredSends().get()).append("\n");
         rank = 1;
-        for (var next : UpaBot.getDiscordService().getScholarshipCommands().computeLeaderboard()) {
+        for (var next : ctx.discord().getScholarshipCommands().computeLeaderboard()) {
             if (next.getMemberId() == memberId) {
                 break;
             }

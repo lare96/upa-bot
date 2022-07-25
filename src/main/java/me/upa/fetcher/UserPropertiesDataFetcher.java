@@ -26,6 +26,8 @@ public final class UserPropertiesDataFetcher extends ApiDataFetcher<Map<Long, Us
     public static final class UserProperty {
         private final long propId;
         private final int cityId;
+
+        private final String cityName;
         private final int neighborhoodId;
         private final String fullAddress;
         private final String status;
@@ -33,9 +35,10 @@ public final class UserPropertiesDataFetcher extends ApiDataFetcher<Map<Long, Us
         private final int fiatSalePrice;
         private final String inGameName;
 
-        public UserProperty(long propId, int cityId, int neighborhoodId, String fullAddress, String status, int upxSalePrice, int fiatSalePrice, String inGameName) {
+        public UserProperty(long propId, int cityId,String cityName, int neighborhoodId, String fullAddress, String status, int upxSalePrice, int fiatSalePrice, String inGameName) {
             this.propId = propId;
             this.cityId = cityId;
+            this.cityName = cityName;
             this.neighborhoodId = neighborhoodId;
             this.fullAddress = fullAddress;
             this.status = status;
@@ -63,6 +66,10 @@ public final class UserPropertiesDataFetcher extends ApiDataFetcher<Map<Long, Us
 
         public int getCityId() {
             return cityId;
+        }
+
+        public String getCityName() {
+            return cityName;
         }
 
         public int getNeighborhoodId() {
@@ -116,7 +123,8 @@ public final class UserPropertiesDataFetcher extends ApiDataFetcher<Map<Long, Us
             for (JsonElement next : jsonProperties.getAsJsonArray()) {
                 JsonObject data = next.getAsJsonObject();
                 long propId = data.get("prop_id").getAsLong();
-                int cityId = DataFetcherManager.getCityId(data.get("city_name").getAsString());
+                String cityName = data.get("city_name").getAsString();
+                int cityId = DataFetcherManager.getCityId(cityName);
                 JsonElement neighborhoodElement = data.get("neighborhood");
                 int neighborhoodId = neighborhoodElement.isJsonNull() ? -1 : DataFetcherManager.getNeighborhoodId(neighborhoodElement.getAsString());
                 String fullAddress = data.get("full_address").getAsString();
@@ -125,7 +133,7 @@ public final class UserPropertiesDataFetcher extends ApiDataFetcher<Map<Long, Us
                 JsonElement fiatSalePriceElement = data.get("sale_fiat_price");
                 int upxSalePrice = upxSalePriceElement.isJsonNull() ? -1 : upxSalePriceElement.getAsInt();
                 int fiatSalePrice = fiatSalePriceElement.isJsonNull() ? -1 : fiatSalePriceElement.getAsInt();
-                properties.put(propId, new UserProperty(propId, cityId, neighborhoodId, fullAddress, status, upxSalePrice, fiatSalePrice, user));
+                properties.put(propId, new UserProperty(propId, cityId, cityName, neighborhoodId, fullAddress, status, upxSalePrice, fiatSalePrice, user));
             }
         } catch (Exception e) {
             logger.catching(e);

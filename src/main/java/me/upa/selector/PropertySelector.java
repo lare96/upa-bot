@@ -1,7 +1,7 @@
 package me.upa.selector;
 
 import com.google.common.collect.Sets;
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.DiscordService;
 import me.upa.discord.SaleNotification;
 import me.upa.discord.SaleNotificationRequest;
@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Level;
 
 /**
  * Represents an algorithm that determine undervalued properties.
@@ -26,6 +25,10 @@ import java.util.logging.Level;
  */
 public abstract class PropertySelector {
 
+
+    protected PropertySelector(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
 
     /**
      * Compares sales for the lowest price.
@@ -43,11 +46,14 @@ public abstract class PropertySelector {
 
     public static final Map<City, Integer> floorPrices = new ConcurrentHashMap<>();
     public static final Set<City> floorPriceChanges = Sets.newConcurrentHashSet();
-
+    /**
+     * The context.
+     */
+    private final UpaBotContext ctx;
     public final void select(City city, Collection<Sale> sales) {
         if (sales == null || sales.isEmpty())
             return;
-        DiscordService discordService = UpaBot.getDiscordService();
+        DiscordService discordService = ctx.discord();
         List<SaleNotificationRequest> requests = computeNotificationRequests(city, sales);
         try {
             for (SaleNotificationRequest nextRequest : requests) {

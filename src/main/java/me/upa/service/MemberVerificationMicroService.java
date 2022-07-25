@@ -3,6 +3,7 @@ package me.upa.service;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.CreditTransaction;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.PendingUpaMember;
@@ -13,6 +14,8 @@ import me.upa.fetcher.UserPropertiesDataFetcher;
 import me.upa.fetcher.UserPropertiesDataFetcher.UserProperty;
 import me.upa.sql.SqlConnectionManager;
 import me.upa.sql.SqlTask;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.UserSnowflake;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
@@ -33,11 +36,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
 public final class MemberVerificationMicroService extends MicroService {
-    public MemberVerificationMicroService() {
+
+    private final UpaBotContext ctx;
+
+    public MemberVerificationMicroService(UpaBotContext ctx) {
         super(Duration.ofMinutes(1));
+        this.ctx = ctx;
     }
 
-    private static final class AddMemberTask extends SqlTask<UpaMember> {
+    private final class AddMemberTask extends SqlTask<UpaMember> {
 
         private final long memberId;
         private final String inGameName;
@@ -75,7 +82,7 @@ public final class MemberVerificationMicroService extends MicroService {
                     }
                 }
                 connection.commit();
-                return new UpaMember(memberKey, memberId, inGameName, UpaBot.getDiscordService().guild().retrieveMemberById(memberId).complete().getEffectiveName(), blockchainAccountId, 0, 0, 0, 0, 0, 0, 0, claimedDailyAt, false, now);
+                return new UpaMember(memberKey, memberId, inGameName, ctx.discord().guild().retrieveMemberById(memberId).complete().getEffectiveName(), blockchainAccountId, 0, 0, 0, 0, 0, 0, 0, claimedDailyAt, false, now);
             } finally {
                 connection.setAutoCommit(true);
             }
@@ -91,7 +98,7 @@ public final class MemberVerificationMicroService extends MicroService {
     @Override
     public void run() throws Exception {
         try {
-            DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+            DatabaseCachingService databaseCaching = ctx.databaseCaching();
 
             for (Entry<Long, PendingUpaMember> entry : pendingRegistrations.asMap().entrySet()) {
                 PendingUpaMember nextMember = entry.getValue();
@@ -123,8 +130,10 @@ public final class MemberVerificationMicroService extends MicroService {
                                             }
                                             databaseCaching.getMembers().put(memberId, success);
                                             databaseCaching.getMemberNames().put(memberId, property.getOwnerUsername());
-                                            UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessage("Welcome to the newest UPA member <@" + memberId + ">! We are now at **" + databaseCaching.getMembers().size() + "** members.").queue();
-                                            UpaBot.getPropertySynchronizationService().wakeUp();
+                                            var guild = ctx.discord().guild();
+                                            guild.getTextChannelById(956790034097373204L).sendMessage("Welcome to the newest UPA member <@" + memberId + ">! We are now at **" + databaseCaching.getMembers().size() + "** members.").queue();
+                                            guild.retrieveMemberById(memberId).queue(loadedMember -> guild.addRoleToMember(UserSnowflake.fromId(memberId), guild.getRoleById(999013596111581284L)).queue());
+                                            ctx.propertySync().wakeUp();
                                         },
                                         failure -> {
                                             if (nextMember.getPrice() != -1) {

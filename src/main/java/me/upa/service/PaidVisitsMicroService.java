@@ -4,7 +4,7 @@ import com.google.common.base.Objects;
 import com.google.common.collect.ConcurrentHashMultiset;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.CreditTransaction;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.UpaMember;
@@ -112,11 +112,13 @@ public final class PaidVisitsMicroService extends MicroService {
             return null;
         }
     }
+    private final UpaBotContext ctx;
 
     private final Multiset<PaidVisitor> lastVisitors = ConcurrentHashMultiset.create();
 
-    public PaidVisitsMicroService() {
+    public PaidVisitsMicroService(UpaBotContext ctx) {
         super(Duration.ofMinutes(3));
+        this.ctx = ctx;
     }
 
     @Override
@@ -196,13 +198,13 @@ public final class PaidVisitsMicroService extends MicroService {
                     for (var next : paidUpx.entrySet()) {
                         transactions.add(new CreditTransaction(next.getElement().upaMember, next.getCount(), CreditTransactionType.PURCHASE, "visiting a designated UPA property"));
                     }
-                    UpaBot.getDiscordService().sendCredit(transactions);
+                    ctx.discord().sendCredit(transactions);
                 }
             });
         }
     }
 
     private Map<String, UpaMember> computeEosMap() {
-        return UpaBot.getDatabaseCachingService().getMembers().values().stream().collect(Collectors.toMap(UpaMember::getBlockchainAccountId, v -> v));
+        return ctx.databaseCaching().getMembers().values().stream().collect(Collectors.toMap(UpaMember::getBlockchainAccountId, v -> v));
     }
 }

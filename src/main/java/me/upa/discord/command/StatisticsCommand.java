@@ -3,7 +3,7 @@ package me.upa.discord.command;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multiset.Entry;
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.DiscordService;
 import me.upa.discord.UpaMember;
 import me.upa.discord.UpaProperty;
@@ -21,6 +21,10 @@ import java.util.Map;
 
 public final class StatisticsCommand extends ListenerAdapter {
     private static final int HOLLIS_PROPERTIES = 4383;
+
+    public StatisticsCommand(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
 
     public static final class StatisticsData {
         private final int memberCount;
@@ -63,7 +67,10 @@ public final class StatisticsCommand extends ListenerAdapter {
             return topOwners;
         }
     }
-
+    /**
+     * The context.
+     */
+    private final UpaBotContext ctx;
     private volatile Instant lastUpdated = Instant.now().minus(2, ChronoUnit.HOURS);
     private volatile StatisticsData statisticsData;
 
@@ -89,7 +96,7 @@ public final class StatisticsCommand extends ListenerAdapter {
     }
 
     private StatisticsData buildStatistics() {
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         int memberCount = 0;
         int propertyCount = 0;
         double hollisPercentOwned = 0;
@@ -143,7 +150,7 @@ public final class StatisticsCommand extends ListenerAdapter {
     }
 
     private String buildMessage(StatisticsData statistics) {
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         StringBuilder sb = new StringBuilder("```\n");
         sb.append("Total members: ").append(statistics.memberCount).append('\n').
                 append("Total properties: ").append(statistics.propertyCount).append('\n').

@@ -40,6 +40,10 @@ public final class Structure {
                 this.minUp2 = 80;
                 this.maxUp2 = Integer.MAX_VALUE;
                 break;
+            case "Small Factory I":
+                this.minUp2 = 100;
+                this.maxUp2 = Integer.MAX_VALUE;
+                break;
             default:
                 throw new IllegalStateException();
 

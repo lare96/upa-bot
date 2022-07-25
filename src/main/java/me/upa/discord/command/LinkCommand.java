@@ -1,6 +1,7 @@
 package me.upa.discord.command;
 
 import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.DiscordService;
 import me.upa.discord.PendingUpaMember;
 import me.upa.service.DatabaseCachingService;
@@ -20,13 +21,13 @@ public final class LinkCommand extends ListenerAdapter {
     /**
      * Handles the link command.
      */
-    public static void handleLinkCommand(IReplyCallback event, String ign, long forceMemberId) {
+    public static void handleLinkCommand(UpaBotContext ctx, IReplyCallback event, String ign, long forceMemberId) {
         String username = ign.toLowerCase().trim();
         if (username.isBlank()) {
             event.reply("Please enter a valid username.").setEphemeral(true).queue();
             return;
         }
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         Member member = event.getMember();
         long memberId = forceMemberId != -1 ? forceMemberId : member.getIdLong();
         String inGameName = databaseCaching.getMemberNames().get(memberId);
@@ -42,6 +43,6 @@ public final class LinkCommand extends ListenerAdapter {
             randomSellPrice = ThreadLocalRandom.current().nextInt(10_000_000, 100_000_000);
             event.reply("In order to verify your identity, please set any property on the account **" + username + "** on sale for **" + DiscordService.COMMA_FORMAT.format(randomSellPrice) + "** UPX. Expires in one hour or if /account is used again.").setEphemeral(true).queue();
         }
-        UpaBot.getMemberVerificationService().getPendingRegistrations().put(memberId, new PendingUpaMember(member, randomSellPrice, username));
+       ctx.memberVerification().getPendingRegistrations().put(memberId, new PendingUpaMember(member, randomSellPrice, username));
     }
 }

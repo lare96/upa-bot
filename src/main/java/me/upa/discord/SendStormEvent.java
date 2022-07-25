@@ -4,6 +4,7 @@ import com.google.common.collect.ConcurrentHashMultiset;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multiset.Entry;
 import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.command.EventCommands;
 import me.upa.fetcher.VisitorsDataFetcher;
@@ -32,17 +33,18 @@ public final class SendStormEvent extends Event {
     private volatile long commentId;
 
     private volatile Instant lastChecked;
-
-    public SendStormEvent(Set<Long> participants, long propertyId) {
+private final UpaBotContext ctx;
+    public SendStormEvent(UpaBotContext ctx, Set<Long> participants, long propertyId) {
         super("Send Storm");
+        this.ctx = ctx;
         this.participants = participants;
         this.propertyId = propertyId;
     }
 
     @Override
     public void handleConfirm(ButtonInteractionEvent event) {
-        TextChannel channel = UpaBot.getDiscordService().guild().getTextChannelById("982800525386993694");
-        Message message = channel.sendMessage(EventCommands.generateMessage(this)).complete();
+        TextChannel channel = ctx.discord().guild().getTextChannelById("982800525386993694");
+        Message message = channel.sendMessage(EventCommands.generateMessage(ctx, this)).complete();
         commentId = message.getIdLong();
         lastChecked = Instant.now();
     }
@@ -59,12 +61,12 @@ public final class SendStormEvent extends Event {
                     }
                 }
                 if (done) {
-                    UpaBot.getEventProcessorService().stop();
+                    ctx.eventProcessor().stop();
                     return;
                 }
             }
             List<CreditTransaction> transactions = new ArrayList<>();
-            DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+            DatabaseCachingService databaseCaching = ctx.databaseCaching();
             var visitorsFetcher = new VisitorsDataFetcher(propertyId);
             visitorsFetcher.fetch();
             List<PropertyVisitor> visitors = visitorsFetcher.waitUntilDone();
@@ -98,9 +100,9 @@ public final class SendStormEvent extends Event {
                 lastChecked = Instant.now();
             }
             if (transactions.size() > 0) {
-                UpaBot.getDiscordService().sendCredit(transactions);
+                ctx.discord().sendCredit(transactions);
             }
-            UpaBot.getDiscordService().guild().getTextChannelById(982800525386993694L).editMessageById(commentId, EventCommands.generateMessage(this)).queue();
+            ctx.discord().guild().getTextChannelById(982800525386993694L).editMessageById(commentId, EventCommands.generateMessage(ctx, this)).queue();
         } catch (Exception e) {
             logger.catching(e);
         }

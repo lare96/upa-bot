@@ -6,9 +6,8 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
-import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.AbstractScheduledService;
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.CreditTransaction;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.Scholar;
@@ -28,6 +27,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -42,6 +42,10 @@ import static me.upa.fetcher.ProfileDataFetcher.DUMMY;
 
 public final class ScholarVerificationService extends AbstractScheduledService {
     private static final Logger logger = LogManager.getLogger();
+
+    public ScholarVerificationService(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
 
     private final class UpdateNetWorthTask extends SqlTask<Void> {
 
@@ -92,8 +96,9 @@ public final class ScholarVerificationService extends AbstractScheduledService {
             return graduates;
         }
     }
+    private final UpaBotContext ctx;
 
-    private final LoadingCache<String, Profile> cachedScholars = CacheBuilder.newBuilder().expireAfterWrite(6, TimeUnit.HOURS).build(new CacheLoader<>() {
+    private final LoadingCache<String, Profile> cachedScholars = CacheBuilder.newBuilder().expireAfterWrite(30, TimeUnit.MINUTES).build(new CacheLoader<>() {
         @Override
         public Profile load(String key) throws Exception {
             var profileDataFetcher = new ProfileDataFetcher(key);
@@ -107,8 +112,7 @@ public final class ScholarVerificationService extends AbstractScheduledService {
     protected void runOneIteration() throws Exception {
         try {
             Multiset<UpaMember> credits = HashMultiset.create();
-            Stopwatch stopwatch = Stopwatch.createStarted();
-            DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+            DatabaseCachingService databaseCaching = ctx.databaseCaching();
             Map<Long, Integer> netWorthUpdates = new HashMap<>();
             Queue<Scholar> removals = new ArrayDeque<>();
             Multiset<String> additionsCount = HashMultiset.create();
@@ -120,10 +124,7 @@ public final class ScholarVerificationService extends AbstractScheduledService {
                 var visitorsFetcher = new VisitorsDataFetcher(scholar.getPropertyId());
                 visitorsFetcher.fetch();
                 List<PropertyVisitor> visitors = visitorsFetcher.waitUntilDone();
-                if (visitors == null) {
-                    continue;
-                }
-                if (visitors.size() > 0) {
+                if (visitors != null && visitors.size() > 0) {
                     Instant newVisitorInstant = visitors.get(0).getVisitedAt();
                     Instant lastVisitorInstant = scholar.getLastFetchInstant().getAndSet(newVisitorInstant);
                     for (PropertyVisitor next : visitors) {
@@ -159,6 +160,7 @@ public final class ScholarVerificationService extends AbstractScheduledService {
                 Profile profile = cachedScholars.get(scholar.getUsername());
                 if (profile == DUMMY) {
                     logger.warn("Could not load profile for {}.", scholar.getUsername());
+                    cachedScholars.invalidate(scholar.getUsername());
                     continue;
                 }
                 int netWorth = profile.getNetWorth();
@@ -195,11 +197,12 @@ public final class ScholarVerificationService extends AbstractScheduledService {
                 SqlConnectionManager.getInstance().execute(new AddSendsTask(additions, lastFetchInstants));
             }
             if (credits.size() > 0) {
+                List<CreditTransaction> transactions = new ArrayList<>();
                 for (var next : credits.entrySet()) {
-                    UpaBot.getDiscordService().sendCredit(new CreditTransaction(next.getElement(), next.getCount(), CreditTransactionType.SENDS));
+                    transactions.add(new CreditTransaction(next.getElement(), next.getCount(), CreditTransactionType.SENDS));
                 }
+                ctx.discord().sendCredit(transactions);
             }
-            logger.info("Scholar verifications completed in {}s.", stopwatch.elapsed(TimeUnit.SECONDS));
         } catch (Exception e) {
             logger.catching(e);
         }

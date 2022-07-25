@@ -34,7 +34,12 @@ public abstract class MicroService {
      * @param duration The duration in-between executions.
      */
     public MicroService(Duration duration) {
-        delayMinutes = duration.toMinutes();
+        long suppliedMinutes = duration.toMinutes();
+        if (suppliedMinutes < 1) {
+            delayMinutes = 1;
+        } else {
+            delayMinutes = suppliedMinutes;
+        }
     }
 
     /**
@@ -42,12 +47,12 @@ public abstract class MicroService {
      */
     final void handleRun() {
         try {
-            if ( ++currentDelay >= delayMinutes) {
+            if (++currentDelay >= delayMinutes) {
                 run();
                 currentDelay = 0;
             }
         } catch (Exception e) {
-           logger.error("Error running service in INSTANT mode.", e);
+            logger.error("Error running service in INSTANT mode.", e);
         }
     }
 

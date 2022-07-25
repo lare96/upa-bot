@@ -19,9 +19,9 @@ public final class RulesButtonListener extends ListenerAdapter {
                 break;
             case "st_guidelines":
                 event.reply(new MessageBuilder().
-                        append("1. It is encouraged to stick with smaller structures for your first build\n").
-                        append("2. Try and prioritize genesis block properties over neighborhood wide properties when requesting a build\n").
-                        append("3. When your build is receiving spark from the train, it's a encouraged to stake on your own in-progress build rather than someone elses\n").build()).
+                        append("1. It is encouraged to stick with smaller structures for your first build\n\n").
+                        append("2. Try and prioritize genesis block properties over neighborhood wide properties when requesting a build\n\n").
+                        append("3. When your build is receiving spark from the train, it's a encouraged to stake on your own in-progress build rather than someone elses\n\n").build()).
                         setEphemeral(true).queue();
                 break;
         }

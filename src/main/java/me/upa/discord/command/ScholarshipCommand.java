@@ -1,7 +1,7 @@
 package me.upa.discord.command;
 
 import com.google.common.collect.ImmutableMap;
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.DiscordService;
 import me.upa.discord.Scholar;
 import me.upa.discord.UpaMember;
@@ -42,6 +42,11 @@ import java.util.stream.Collectors;
  * @author lare96
  */
 public final class ScholarshipCommand extends ListenerAdapter {
+
+
+    public ScholarshipCommand(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
 
     public static final class LeaderboardMember implements Comparable<LeaderboardMember> {
 
@@ -87,6 +92,10 @@ public final class ScholarshipCommand extends ListenerAdapter {
         }
     }
 
+    /**
+     * The context.
+     */
+    private final UpaBotContext ctx;
     private static final Logger logger = LogManager.getLogger();
     private static final ScholarComparator SCHOLAR_COMPARATOR = new ScholarComparator();
     private static final int CITY_TIER_COUNT = 5;
@@ -122,12 +131,13 @@ public final class ScholarshipCommand extends ListenerAdapter {
 
         @Override
         public Void execute(Connection connection) throws Exception {
-            try (PreparedStatement updateScholar = connection.prepareStatement("INSERT INTO scholars (address, property_id, discord_id, net_worth, last_fetch) VALUES (?, ?, ?, ?, ?);")) {
-                updateScholar.setString(1, scholar.getAddress());
-                updateScholar.setLong(2, scholar.getPropertyId());
-                updateScholar.setLong(3, scholar.getMemberId());
-                updateScholar.setInt(4, scholar.getNetWorth().get());
-                updateScholar.setString(5, scholar.getLastFetchInstant().get().toString());
+            try (PreparedStatement updateScholar = connection.prepareStatement("INSERT INTO scholars (username, address, property_id, discord_id, net_worth, last_fetch) VALUES (?, ?, ?, ?, ?, ?);")) {
+                updateScholar.setString(1, scholar.getUsername());
+                updateScholar.setString(2, scholar.getAddress());
+                updateScholar.setLong(3, scholar.getPropertyId());
+                updateScholar.setLong(4, scholar.getMemberId());
+                updateScholar.setInt(5, scholar.getNetWorth().get());
+                updateScholar.setString(6, scholar.getLastFetchInstant().get().toString());
                 if (updateScholar.executeUpdate() < 1) {
                     logger.warn("Scholar could not be sponsored.");
                     return null;
@@ -138,11 +148,12 @@ public final class ScholarshipCommand extends ListenerAdapter {
     }
 
     public static Button becomeAScholarButton() {
-    return     Button.of(ButtonStyle.PRIMARY, "become_a_scholar", "Become a scholar", Emoji.fromUnicode("U+1F393"));
+        return Button.of(ButtonStyle.PRIMARY, "become_a_scholar", "Become a scholar", Emoji.fromUnicode("U+1F393"));
     }
+
     private volatile List<LeaderboardMember> members;
 
-    @Override
+  /*  @Override
     public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
         if (event.getName().equals("scholarships")) {
             event.reply("Select an action.").setEphemeral(true).addActionRow(
@@ -150,7 +161,7 @@ public final class ScholarshipCommand extends ListenerAdapter {
                     Button.of(ButtonStyle.PRIMARY, "view_scholar_list", "View scholar list", Emoji.fromUnicode("U+1F4CB")),
                     Button.of(ButtonStyle.PRIMARY, "view_leaderboard", "View leaderboard", Emoji.fromUnicode("U+1F947"))).queue();
         }
-    }
+    }*/
 
     @Override
     public void onButtonInteraction(@NotNull ButtonInteractionEvent event) {
@@ -158,15 +169,15 @@ public final class ScholarshipCommand extends ListenerAdapter {
             switch (event.getButton().getId()) {
                 case "become_a_scholar":
                     handleApply(event);
-                    event.getInteraction().editButton(event.getButton().asDisabled()).queue();
+                  //  event.getInteraction().editButton(event.getButton().asDisabled()).queue();
                     break;
                 case "view_scholar_list":
                     handleView(event);
-                    event.getInteraction().editButton(event.getButton().asDisabled()).queue();
+                 //   event.getInteraction().editButton(event.getButton().asDisabled()).queue();
                     break;
                 case "view_leaderboard":
                     handleLeaderboard(event);
-                    event.getInteraction().editButton(event.getButton().asDisabled()).queue();
+                  //  event.getInteraction().editButton(event.getButton().asDisabled()).queue();
                     break;
             }
         }
@@ -244,12 +255,12 @@ public final class ScholarshipCommand extends ListenerAdapter {
                                 lastVisitorInstant = visitors.get(0).getVisitedAt();
                             }
 
-                            DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+                            DatabaseCachingService databaseCaching = ctx.databaseCaching();
                             for (PropertyVisitor next : visitors) {
                                 if (next.isPending()) {
                                     continue;
                                 }
-                               Long nextMemberId = databaseCaching.getMemberNames().inverse().get(next.getUsername());
+                                Long nextMemberId = databaseCaching.getMemberNames().inverse().get(next.getUsername());
                                 if (nextMemberId == null) {
                                     continue;
                                 }
@@ -259,11 +270,13 @@ public final class ScholarshipCommand extends ListenerAdapter {
                                 }
                                 nextMember.getSends().incrementAndGet();
                             }
-                            Scholar scholar = new Scholar(profile.getOwnerUsername(), selected.getFullAddress(), selected.getPropId(), netWorth, memberId, false, lastVisitorInstant);
+                            String fullAddress = selected.getFullAddress() + ", " + selected.getCityName();
+                            Scholar scholar = new Scholar(profile.getOwnerUsername(), fullAddress, selected.getPropId(), netWorth, memberId, false, lastVisitorInstant);
                             SqlConnectionManager.getInstance().execute(new ApplyTask(scholar),
                                     success -> {
                                         event.getHook().editOriginal("Your application has been accepted! Please set the visitor fee to the maximum amount at **" + finalSelected.getFullAddress() + "**. This will ensure you get the most sends possible!").queue();
-                                        UpaBot.getDatabaseCachingService().getScholars().put(memberId, scholar);
+                                        ctx.databaseCaching().getScholars().put(memberId, scholar);
+                                        ctx.discord().guild().getTextChannelById(970917870320111666L).sendMessage("<@&999013596111581284> Help <@" + memberId + "> reach Uplander status by visiting **" + fullAddress + "**, and earn PAC on each visit! Go to <#975506360231948288> to learn more\n\nProperty link: https://play.upland.me/?prop_id="+ finalSelected.getPropId()).queue();
                                     },
                                     failure -> {
                                         event.getHook().editOriginal("Your application could not be finalized! Please reach out to <@220622659665264643>.").queue();
@@ -280,7 +293,7 @@ public final class ScholarshipCommand extends ListenerAdapter {
 
     private void handleApply(ButtonInteractionEvent event) {
         long memberId = event.getMember().getIdLong();
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         if (databaseCaching.getScholars().containsKey(memberId)) {
             event.reply("You are already a scholar.").setEphemeral(true).queue();
             return;
@@ -292,14 +305,14 @@ public final class ScholarshipCommand extends ListenerAdapter {
     }
 
     private void handleView(ButtonInteractionEvent event) {
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         if (databaseCaching.getScholars().isEmpty()) {
             event.reply("There are no scholars to list.").setEphemeral(true).queue();
             return;
         }
         event.deferReply().setEphemeral(true).queue();
-        UpaBot.getDiscordService().execute(() -> {
-            StringBuilder sb = new StringBuilder("Send your block explorer to scholar properties to earn PAC. Sending to the sponsored scholar will gives bonus PAC!\n```\n");
+        ctx.discord().execute(() -> {
+            StringBuilder sb = new StringBuilder("Send your block explorer to scholar properties to earn PAC. Sending to the sponsored scholar gives bonus PAC!\n\n");
             synchronized (databaseCaching.getScholars()) {
                 List<SortedScholar> all = databaseCaching.getScholars().values().stream().map(SortedScholar::new).sorted().collect(Collectors.toList());
                 try {
@@ -307,8 +320,7 @@ public final class ScholarshipCommand extends ListenerAdapter {
                         Member member = event.getGuild().retrieveMemberById(sorted.scholar.getMemberId()).complete();
                         sb.append(sorted.scholar.getAddress()).append(" | ").
                                 append("Net worth: ").append(DiscordService.COMMA_FORMAT.format(sorted.scholar.getNetWorth().get())).append(" UPX").append(" | ").
-                                append(sorted.scholar.getUsername()).append(" | ").
-                                append("@").append(member.getEffectiveName());
+                                append(sorted.scholar.getUsername()).append(" | ").append(member.getAsMention());
                         if (sorted.scholar.getSponsored().get()) {
                             sb.append(" (Sponsored)");
                         }
@@ -319,7 +331,6 @@ public final class ScholarshipCommand extends ListenerAdapter {
                 }
 
             }
-            sb.append("```");
             event.getHook().setEphemeral(true).editOriginal(sb.toString()).queue();
         });
     }
@@ -341,7 +352,7 @@ public final class ScholarshipCommand extends ListenerAdapter {
     }
 
     public List<LeaderboardMember> computeLeaderboard() {
-        return UpaBot.getDatabaseCachingService().getMembers().values().stream().
+        return ctx.databaseCaching().getMembers().values().stream().
                 filter(next -> next.getTotalSends() > 0).
                 map(next -> new LeaderboardMember(next.getMemberId(), next.getDiscordName().get(), next.getTotalSends())).
                 sorted().collect(Collectors.toList());

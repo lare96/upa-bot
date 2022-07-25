@@ -1,5 +1,6 @@
 package me.upa.service;
 
+import com.fasterxml.jackson.databind.annotation.JsonAppend.Prop;
 import com.google.common.base.Objects;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -8,6 +9,7 @@ import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.AbstractScheduledService;
 import com.google.common.util.concurrent.Uninterruptibles;
 import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.CreditTransaction;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.UpaMember;
@@ -15,6 +17,7 @@ import me.upa.discord.UpaProperty;
 import me.upa.fetcher.DataFetcherManager;
 import me.upa.fetcher.ProfileDataFetcher;
 import me.upa.fetcher.PropertyDataFetcher;
+import me.upa.game.CachedProperty;
 import me.upa.game.Neighborhood;
 import me.upa.game.Profile;
 import me.upa.game.Property;
@@ -25,6 +28,7 @@ import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.UserSnowflake;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.checkerframework.checker.units.qual.C;
 
 import java.awt.geom.Path2D;
 import java.io.IOException;
@@ -47,7 +51,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Phaser;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
@@ -114,15 +120,19 @@ public class PropertySynchronizationService extends AbstractScheduledService {
     private volatile State state;
     private volatile Profile lastUser;
 
-    private final AtomicBoolean wakeUp = new AtomicBoolean();
+    private final Phaser idleMonitor = new Phaser(2);
     private final Set<UpaProperty> removals = Sets.newConcurrentHashSet();
     private final Set<NodeProperty> additions = Sets.newConcurrentHashSet();
-    private final Set<Long> lookups = Sets.newConcurrentHashSet();
+    private final UpaBotContext ctx;
+
+    public PropertySynchronizationService(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
 
     @Override
     protected void startUp() throws Exception {
         if (Files.exists(CURRENT_SYNC_FILE)) {
-            lastUser = UpaBot.load(CURRENT_SYNC_FILE);
+            lastUser = ctx.load(CURRENT_SYNC_FILE);
             state = State.SYNCHRONIZE;
             if (lastUser == null || lastUser.getOwnerUsername() == null) {
                 lastUser = null;
@@ -143,8 +153,8 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                 logger.info("Resuming IDLE state for {}:{}.", hours, minutes);
                 return;
             }
-            long memberId = UpaBot.getDatabaseCachingService().getMemberNames().inverse().get(lastUser.getOwnerUsername());
-            UpaMember upaMember = UpaBot.getDatabaseCachingService().getMembers().get(memberId);
+            long memberId = ctx.databaseCaching().getMemberNames().inverse().get(lastUser.getOwnerUsername());
+            UpaMember upaMember = ctx.databaseCaching().getMembers().get(memberId);
             logger.info("Resuming sync for @" + upaMember.getDiscordName());
         } else {
             state = State.SELECT;
@@ -165,9 +175,7 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                     verifyUserMembership();
                     break;
                 case IDLE:
-                    while (!wakeUp.compareAndSet(true, false)) {
-                        Uninterruptibles.sleepUninterruptibly(Duration.of(1, ChronoUnit.MINUTES));
-                    }
+                    idleMonitor.arriveAndAwaitAdvance();
                     logger.info("Property synchronization service waking up!");
                     Files.deleteIfExists(CURRENT_SYNC_FILE);
                     lastUser = null;
@@ -186,12 +194,12 @@ public class PropertySynchronizationService extends AbstractScheduledService {
 
     public void wakeUp() {
         if (state == State.IDLE) {
-            wakeUp.set(true);
+            idleMonitor.arrive();
         }
     }
 
     private void selectNextUser() throws Exception {
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         for (UpaMember upaMember : databaseCaching.getMembers().values()) {
             if (!upaMember.getSync().get()) {
                 try {
@@ -200,21 +208,21 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                     if (nextProfile == DUMMY) {
                         continue;
                     }
-               /*     if(nextProfile.getNetWorth() < 100_000) {
-                        UpaBot.getDiscordService().guild().retrieveMemberById(upaMember.getMemberId()).queue(success -> {
-                            UpaBot.getDiscordService().guild().addRoleToMember(UserSnowflake.fromId(success.getIdLong()),
-                                    UpaBot.getDiscordService().guild().getRoleById(875511923305754725L)).queue();
+                   if(nextProfile.getNetWorth() < 100_000) {
+                        ctx.discord().guild().retrieveMemberById(upaMember.getMemberId()).queue(success -> {
+                            ctx.discord().guild().addRoleToMember(UserSnowflake.fromId(success.getIdLong()),
+                                    ctx.discord().guild().getRoleById(875511923305754725L)).queue();
                         });
                     } else {
-                        UpaBot.getDiscordService().guild().retrieveMemberById(upaMember.getMemberId()).queue(success -> {
-                            UpaBot.getDiscordService().guild().removeRoleFromMember(UserSnowflake.fromId(success.getIdLong()),
-                                    UpaBot.getDiscordService().guild().getRoleById(875511923305754725L)).queue();
+                        ctx.discord().guild().retrieveMemberById(upaMember.getMemberId()).queue(success -> {
+                            ctx.discord().guild().removeRoleFromMember(UserSnowflake.fromId(success.getIdLong()),
+                                    ctx.discord().guild().getRoleById(875511923305754725L)).queue();
                         });
-                    }*/
+                    }
                     // Next member to sync was found.
                     logger.info("Starting property synchronization for @{}.", upaMember.getDiscordName());
                     lastUser = nextProfile;
-                    UpaBot.save(CURRENT_SYNC_FILE, nextProfile);
+                    ctx.save(CURRENT_SYNC_FILE, nextProfile);
                     state = State.SYNCHRONIZE;
                 } catch (Exception e) {
                     logger.catching(e);
@@ -229,7 +237,7 @@ public class PropertySynchronizationService extends AbstractScheduledService {
             if (statement.executeUpdate() > 0) {
                 databaseCaching.getMembers().values().forEach(next -> next.getSync().set(false));
                 state = State.IDLE;
-                UpaBot.save(CURRENT_SYNC_FILE, new Profile(Instant.now().plus(2, ChronoUnit.HOURS).toString(), -1, Set.of(), true));
+                ctx.save(CURRENT_SYNC_FILE, new Profile(Instant.now().plus(12, ChronoUnit.HOURS).toString(), -1, Set.of(), true));
                 logger.info("No members require synchronization, going into idle mode.");
             }
         }
@@ -239,16 +247,17 @@ public class PropertySynchronizationService extends AbstractScheduledService {
         if (lastUser == null) {
             return;
         }
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         long memberId = databaseCaching.getMemberNames().inverse().get(lastUser.getOwnerUsername());
         UpaMember upaMember = databaseCaching.getMembers().get(memberId);
         Set<UpaProperty> cachedUserProperties = databaseCaching.getMemberProperties().get(upaMember.getKey());
+        Set<Long> propertyLookups = ctx.variables().propertyLookup().getValue();
         boolean completed = true;
         synchronized (databaseCaching.getMemberProperties()) {
             int total = 0;
 
             // Analyze for possible removals (contained in DB, but not in-game).
-            for (UpaProperty upaProperty : cachedUserProperties) {
+            for (UpaProperty upaProperty : cachedUserProperties)  {
                 if (total >= MAX_REQUESTS) {
                     completed = false;
                     break;
@@ -269,7 +278,7 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                     break;
                 }
                 if (databaseCaching.getProperties().containsKey(propertyId) ||
-                        databaseCaching.getPropertyLookup().contains(propertyId)) {
+                        propertyLookups.contains(propertyId)) {
                     continue;
                 }
                 if (!cachedUserPropertyIds.contains(propertyId)) {
@@ -301,6 +310,7 @@ public class PropertySynchronizationService extends AbstractScheduledService {
             Map<Long, Integer> memberKeys = new HashMap<>();
             List<Property> newProperties = new ArrayList<>();
 
+            boolean needsSave = false;
             Iterator<NodeProperty> additionsIterator = additions.iterator();
             while (additionsIterator.hasNext()) {
                 NodeProperty next = additionsIterator.next();
@@ -309,12 +319,18 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                 if (cachedProperty == null) {
                     continue;
                 }
-                if (withinBounds(cachedProperty, "Hollis")) {
+                Neighborhood neighborhood = getNeighborhood(cachedProperty);
+                int neighborhoodId = neighborhood != null ? neighborhood.getId() : -1;
+                if (neighborhoodId == 1745) {
                     newProperties.add(cachedProperty);
                     memberKeys.put(cachedProperty.getPropId(), next.memberKey);
-                } else if (databaseCaching.getPropertyLookup().add(cachedProperty.getPropId())) {
-                    lookups.add(cachedProperty.getPropId());
+                } else {
+                    propertyLookups.add(cachedProperty.getPropId());
+                    needsSave =true;
                 }
+            }
+            if(needsSave) {
+                ctx.variables().propertyLookup().save();
             }
             if (newProperties.size() > 0) {
                 logger.info("Processing {} new node properties.", newProperties.size());
@@ -333,7 +349,7 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                         insertProperty.setString(5, "HOLLIS");
                         insertProperty.setInt(6, property.getArea());
                         insertProperty.addBatch();
-                        if(property.isMintedByOwner()) {
+                        if (property.isMintedByOwner()) {
                             minted++;
                         }
                         properties.add(new UpaProperty(key, property.getFullAddress(), property.getPropId(), property.getBuildStatus(), "HOLLIS", property.getArea(), false));
@@ -344,30 +360,15 @@ public class PropertySynchronizationService extends AbstractScheduledService {
                             databaseCaching.getProperties().put(upaProperty.getPropertyId(), upaProperty);
                             upaMember.getTotalUp2().addAndGet(upaProperty.getUp2());
                         }
-                        if(minted > 0) {
+                        if (minted > 0) {
                             upaMember.getMinted().addAndGet(minted);
-                            UpaBot.getDiscordService().sendCredit(new CreditTransaction(upaMember, minted * 200, CreditTransactionType.MINTED, String.valueOf(minted)));
+                            ctx.discord().sendCredit(new CreditTransaction(upaMember, minted * 200, CreditTransactionType.MINTED, String.valueOf(minted)));
                         }
                         updateMints.setInt(1, minted);
                         updateMints.setLong(2, memberId);
                         updateMints.executeUpdate();
                     }
                 }
-            }
-        }
-        if (lookups.size() > 0) {
-            logger.info("Caching {} new lookup property IDs.", lookups.size());
-
-            try (Connection connection = SqlConnectionManager.getInstance().take();
-                 PreparedStatement insertProperty = connection.prepareStatement("INSERT INTO property_lookup (property_id) VALUES (?);")) {
-                Iterator<Long> lookupsIterator = lookups.iterator();
-                while (lookupsIterator.hasNext()) {
-                    long nextId = lookupsIterator.next();
-                    lookupsIterator.remove();
-                    insertProperty.setLong(1, nextId);
-                    insertProperty.addBatch();
-                }
-                insertProperty.executeBatch();
             }
         }
         if (completed) {
@@ -385,11 +386,11 @@ public class PropertySynchronizationService extends AbstractScheduledService {
 
     private void verifyUserMembership() throws Exception {
         try {
-            DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+            DatabaseCachingService databaseCaching = ctx.databaseCaching();
             long memberId = databaseCaching.getMemberNames().inverse().get(lastUser.getOwnerUsername());
             UpaMember upaMember = databaseCaching.getMembers().get(memberId);
             int propertyCount = databaseCaching.getMemberProperties().get(upaMember.getKey()).size();
-            Guild guild = UpaBot.getDiscordService().guild();
+            Guild guild = ctx.discord().guild();
             Role nodeMemberRole = guild.getRoleById(956793551230996502L);
 
             if (propertyCount == 0) {
@@ -409,38 +410,44 @@ public class PropertySynchronizationService extends AbstractScheduledService {
      * Checks if {@code property} is within the neighborhood represented by {@code neighborhoodName}.
      *
      * @param property The property.
-     * @param neighborhoodName The neighborhood name.
      * @return If the property is within the neighborhood.
      */
-    public static boolean withinBounds(Property property, String neighborhoodName) {
-        if (property == null || (neighborhoodName.equals("Hollis") && property.getCityId() != 4))
-            return false;
-        Neighborhood neighborhood = DataFetcherManager.getNeighborhoodMap().get(DataFetcherManager.getNeighborhoodId(neighborhoodName));
-        List<Double> neighborhoodX = new ArrayList<>();
-        List<Double> neighborhoodY = new ArrayList<>();
-        List<Double> propertyX = new ArrayList<>();
-        List<Double> propertyY = new ArrayList<>();
-        for (int index = 0; index < neighborhood.getNeighborhoodArea().length; index++) {
-            neighborhoodX.add(neighborhood.getNeighborhoodArea()[index][0]);
-            neighborhoodY.add(neighborhood.getNeighborhoodArea()[index][1]);
-        }
-        for (int index = 0; index < property.getCoordinates().length; index++) {
-            propertyX.add(property.getCoordinates()[index][0]);
-            propertyY.add(property.getCoordinates()[index][1]);
-        }
+    public static Neighborhood getNeighborhood(Property property) {
+        if (property == null)
+            return null;
+        for (Neighborhood neighborhood : DataFetcherManager.getNeighborhoods(property.getCityId())) {
+            if(neighborhood == null) {
+                continue;
+            }
+            List<Double> neighborhoodX = new ArrayList<>();
+            List<Double> neighborhoodY = new ArrayList<>();
+            List<Double> propertyX = new ArrayList<>();
+            List<Double> propertyY = new ArrayList<>();
+            for (int index = 0; index < neighborhood.getNeighborhoodArea().length; index++) {
+                neighborhoodX.add(neighborhood.getNeighborhoodArea()[index][0]);
+                neighborhoodY.add(neighborhood.getNeighborhoodArea()[index][1]);
+            }
+            for (int index = 0; index < property.getCoordinates().length; index++) {
+                propertyX.add(property.getCoordinates()[index][0]);
+                propertyY.add(property.getCoordinates()[index][1]);
+            }
 
-        Path2D neighborhoodPath = new Path2D.Double();
-        Path2D propertyPath = new Path2D.Double();
-        neighborhoodPath.moveTo(neighborhoodX.get(0), neighborhoodY.get(0));
-        for (int i = 1; i < neighborhoodX.size(); ++i) {
-            neighborhoodPath.lineTo(neighborhoodX.get(i), neighborhoodY.get(i));
+            Path2D neighborhoodPath = new Path2D.Double();
+            Path2D propertyPath = new Path2D.Double();
+            neighborhoodPath.moveTo(neighborhoodX.isEmpty() ? 0 : neighborhoodX.get(0), neighborhoodY.isEmpty() ? 0 : neighborhoodY.get(0));
+            for (int i = 1; i < neighborhoodX.size(); ++i) {
+                neighborhoodPath.lineTo(neighborhoodX.get(i), neighborhoodY.get(i));
+            }
+            neighborhoodPath.closePath();
+            propertyPath.moveTo(propertyX.get(0), propertyY.get(0));
+            for (int i = 1; i < propertyX.size(); ++i) {
+                propertyPath.lineTo(propertyX.get(i), propertyY.get(i));
+            }
+            propertyPath.closePath();
+            if (neighborhoodPath.contains(propertyPath.getCurrentPoint())) {
+                return neighborhood;
+            }
         }
-        neighborhoodPath.closePath();
-        propertyPath.moveTo(propertyX.get(0), propertyY.get(0));
-        for (int i = 1; i < propertyX.size(); ++i) {
-            propertyPath.lineTo(propertyX.get(i), propertyY.get(i));
-        }
-        propertyPath.closePath();
-        return neighborhoodPath.contains(propertyPath.getCurrentPoint());
+        return null;
     }
 }

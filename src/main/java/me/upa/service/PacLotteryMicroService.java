@@ -1,6 +1,6 @@
 package me.upa.service;
 
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.CreditTransaction;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.DiscordService;
@@ -10,35 +10,35 @@ import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.MessageBuilder;
 import net.dv8tion.jda.api.entities.Emoji;
 import net.dv8tion.jda.api.entities.Message;
-import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.UserSnowflake;
 import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.interactions.components.buttons.ButtonStyle;
 
-import javax.print.DocFlavor.READER;
 import java.awt.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 public final class PacLotteryMicroService extends MicroService {
 
     /**
+     * The context.
+     */
+    private final UpaBotContext ctx;
+
+    /**
      * Creates a new {@link PacLotteryMicroService}.
      */
-    public PacLotteryMicroService() {
+    public PacLotteryMicroService(UpaBotContext ctx) {
         super(Duration.ofHours(1));
+        this.ctx = ctx;
     }
 
     @Override
     public void startUp() throws Exception {
-        UpaBot.variables().lottery().access(lottery ->
+        ctx.variables().lottery().access(lottery ->
                 lottery.compareAndSet(null, new UpaLottery()));
         sendMessage();
     }
@@ -46,7 +46,7 @@ public final class PacLotteryMicroService extends MicroService {
     //private static final Emoji
     @Override
     public void run() throws Exception {
-        UpaBot.variables().lottery().accessValue(currentLottery -> {
+        ctx.variables().lottery().accessValue(currentLottery -> {
             // if only one person delay one more week
             if (Instant.now().isAfter(currentLottery.getFinishedAt().get())) {
                 int jackpot = currentLottery.getPac().get();
@@ -54,19 +54,19 @@ public final class PacLotteryMicroService extends MicroService {
                 if (jackpot == 0 || winnerId == -1) {
                     return false;
                 }
-                UpaMember upaMember = UpaBot.getDatabaseCachingService().getMembers().get(winnerId);
+                UpaMember upaMember = ctx.databaseCaching().getMembers().get(winnerId);
                 if (upaMember == null) {
                     currentLottery.getContestants().remove(winnerId);
                     return false;
                 }
                 StringBuilder sb = new StringBuilder();
                 currentLottery.getContestants().forEach(next -> sb.append("<@").append(next).append("> "));
-                UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessageEmbeds(new EmbedBuilder().
+                ctx.discord().guild().getTextChannelById(963112034726195210L).sendMessageEmbeds(new EmbedBuilder().
                         setDescription("Congratulations to <@"+winnerId+"> for winning the lottery! Buy your tickets for the next one at <#993201967096660069>").
                         addField("Pot", "**"+jackpot+" PAC**", false).
                         addField("Contestants", sb.toString(), false).
                         setColor(Color.YELLOW).build()).queue();
-                UpaBot.getDiscordService().sendCredit(new CreditTransaction(upaMember, jackpot, CreditTransactionType.LOTTERY));
+                ctx.discord().sendCredit(new CreditTransaction(upaMember, jackpot, CreditTransactionType.LOTTERY));
                 currentLottery.getContestants().clear();
                 currentLottery.getLastWinner().set(winnerId);
                 currentLottery.getPac().set(0);
@@ -79,17 +79,17 @@ public final class PacLotteryMicroService extends MicroService {
     }
 
     public boolean hasTicket(long memberId) {
-        UpaLottery currentLottery = UpaBot.variables().lottery().getValue();
+        UpaLottery currentLottery = ctx.variables().lottery().getValue();
         return currentLottery != null && currentLottery.getContestants().contains(memberId);
     }
 
 
     public void addTicket(long memberId) {
-        UpaBot.variables().lottery().accessValue(currentLottery -> {
+        ctx.variables().lottery().accessValue(currentLottery -> {
             if (currentLottery != null && currentLottery.getContestants().add(memberId)) {
                 currentLottery.getPac().addAndGet(250);
-                Role role = UpaBot.getDiscordService().guild().getRoleById(983750455429570620L);
-                UpaBot.getDiscordService().guild().addRoleToMember(UserSnowflake.fromId(memberId), role).queue();
+                Role role = ctx.discord().guild().getRoleById(983750455429570620L);
+                ctx.discord().guild().addRoleToMember(UserSnowflake.fromId(memberId), role).queue();
                 sendMessage();
                 return true;
             }
@@ -98,11 +98,11 @@ public final class PacLotteryMicroService extends MicroService {
     }
 
     public void sendMessage() {
-        UpaBot.getDiscordService().guild().getTextChannelById(993201967096660069L).retrieveMessageById(993202507188797550L).complete().editMessage(buildMessage()).queue();
+        ctx.discord().guild().getTextChannelById(993201967096660069L).retrieveMessageById(993202507188797550L).complete().editMessage(buildMessage()).queue();
     }
 
     private Message buildMessage() {
-        UpaLottery currentLottery = UpaBot.variables().lottery().getValue();
+        UpaLottery currentLottery = ctx.variables().lottery().getValue();
         long endDays = Instant.now().until(currentLottery.getFinishedAt().get(), ChronoUnit.DAYS);
         String endsIn = endDays == 0 ? "Less than 24h!" : endDays == 1 ? "1 day" : endDays + " days";
         long lastWinnerId = currentLottery.getLastWinner().get();

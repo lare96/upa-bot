@@ -30,7 +30,7 @@ public abstract class BlockchainDataFetcher<T> {
                 .headers("authority", "eos.hyperion.eosrio.io",
                         "accept", "application/json")
                 .build();
-        logger.info("Blockchain API request {}", link);
+        logger.debug("Blockchain API request {}", link);
         CompletableFuture<T> task = client.sendAsync(request, BodyHandlers.ofString()).
                 handleAsync((response, throwable) -> {
                     if (throwable != null) {

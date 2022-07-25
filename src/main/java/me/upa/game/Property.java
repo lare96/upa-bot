@@ -1,5 +1,7 @@
 package me.upa.game;
 
+import com.google.common.base.Objects;
+
 import java.time.Instant;
 
 public final class Property {
@@ -50,6 +52,19 @@ public final class Property {
         this.progressInSpark = progressInSpark;
         this.maxStakedSpark = maxStakedSpark;
         this.finishedAt = finishedAt;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Property property = (Property) o;
+        return propId == property.propId;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(propId);
     }
 
     public long getPropId() {
@@ -113,6 +128,9 @@ public final class Property {
     }
 
     public boolean isMintedByOwner() {
+        if(lastTransactionId == null) {
+            return true;
+        }
         return transactionId.equals(lastTransactionId);
     }
     public int getMaxStakedSpark() {

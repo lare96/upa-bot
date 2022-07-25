@@ -1,8 +1,9 @@
 package me.upa.discord;
 
+import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.AbstractIdleService;
+import me.upa.UpaBotContext;
 import me.upa.discord.command.AdminPanelCommand;
-import me.upa.UpaBot;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.command.AccountCommands;
 import me.upa.discord.command.AdminCommands;
@@ -23,6 +24,7 @@ import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.MessageBuilder;
+import net.dv8tion.jda.api.MessageBuilder.Formatting;
 import net.dv8tion.jda.api.entities.Emoji;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Message;
@@ -41,6 +43,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
@@ -48,6 +52,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -60,12 +65,10 @@ import static java.util.Objects.requireNonNull;
  */
 public final class DiscordService extends AbstractIdleService {
 
-    private static final Logger logger = LogManager.getLogger();
-
     /**
-     * The pool for asynchronous commands.
+     * The logger.
      */
-    private static final ExecutorService commandPool = Executors.newCachedThreadPool();
+    private static final Logger logger = LogManager.getLogger();
 
     /**
      * The decimal formatter.
@@ -80,17 +83,28 @@ public final class DiscordService extends AbstractIdleService {
     /**
      * The date-time formatter.
      */
-    public static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("MMMM d, yyyy");
+    public static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("MMMM d, yyyy").
+            withLocale(Locale.US).withZone(ZoneId.from(ZoneOffset.UTC));
 
     /**
      * The purple color constant.
      */
-    private static final Color PURPLE = new Color(102, 0, 153);
+    public static final Color PURPLE = new Color(102, 0, 153);
 
     /**
      * The gold color constant.
      */
     private static final Color GOLD = new Color(255, 223, 0);
+
+    /**
+     * The context.
+     */
+    private final UpaBotContext ctx;
+
+    /**
+     * The pool for asynchronous commands.
+     */
+    private final ExecutorService commandPool = Executors.newCachedThreadPool();
 
     /**
      * Previous sent notifications to avoid duplicates.
@@ -110,29 +124,43 @@ public final class DiscordService extends AbstractIdleService {
     /**
      * The statistics command event listener.
      */
-    private final StatisticsCommand statisticsCommand = new StatisticsCommand();
+    private final StatisticsCommand statisticsCommand;
 
     /**
      * The scholarship command event listener.
      */
-    private final ScholarshipCommand scholarshipCommand = new ScholarshipCommand();
+    private final ScholarshipCommand scholarshipCommand;
 
     /**
      * The invite tracker event listener.
      */
-    private final InviteTracker inviteTracker = new InviteTracker();
+    private final InviteTracker inviteTracker;
 
     /**
      * The spark train message listener.
      */
-    private final SparkTrainMessageListener sparkTrain = new SparkTrainMessageListener();
+    private final SparkTrainMessageListener sparkTrain;
+
+    /**
+     * Creates a new {@link UpaBotContext}.
+     *
+     * @param ctx The context.
+     */
+    public DiscordService(UpaBotContext ctx) {
+        this.ctx = ctx;
+        inviteTracker = new InviteTracker(ctx);
+        statisticsCommand = new StatisticsCommand(ctx);
+        scholarshipCommand = new ScholarshipCommand(ctx);
+        sparkTrain = new SparkTrainMessageListener(ctx);
+    }
 
     @Override
     protected void startUp() throws Exception {
+        //  bot = JDABuilder.createDefault("OTk5MjMwOTk3NDgyNzA0ODk2.Gk9FKr.-6ThQ9Xc4nJiBEQeFtFFrGUIIAf-Uz3jxCYjk8").build();
         bot = JDABuilder.createDefault("OTU2ODcxNjc5NTg0NDAzNTI2.Yj2iMg.jCRKAe8o6u1XppSbS4uV_eJRPxI").enableIntents(GatewayIntent.GUILD_WEBHOOKS).
-                addEventListeners(sparkTrain, inviteTracker, scholarshipCommand, new RulesButtonListener(), new ReferralMessageListener(), new FaqButtonListener(), new AdminPanelCommand(),
-                        new CreditViewerContextMenu(), new PacLotteryButtonListener(), new AdminCommands(), new AccountCommands(),
-                        new EventCommands(), new PacCommands(), statisticsCommand).build().awaitReady();
+                addEventListeners(sparkTrain, inviteTracker, scholarshipCommand, new RulesButtonListener(), new ReferralMessageListener(ctx), new FaqButtonListener(ctx), new AdminPanelCommand(ctx),
+                        new CreditViewerContextMenu(ctx), new PacLotteryButtonListener(ctx), new AdminCommands(ctx), new AccountCommands(ctx),
+                        new EventCommands(ctx), new PacCommands(ctx), statisticsCommand).build().awaitReady();
     }
 
     @Override
@@ -140,22 +168,46 @@ public final class DiscordService extends AbstractIdleService {
         bot().shutdown();
     }
 
+    private void updatePacStats() {
+        guild().getTextChannelById(1000173221326364722L).editMessageById(1000173279534907504L,
+                new MessageBuilder().append("Total PAC in circulation ~ **" + DiscordService.COMMA_FORMAT.format(ctx.databaseCaching().getTotalPac().get()) + " PAC**\n\nPurchase PAC or redeem your existing PAC here for rewards!").
+                        setActionRows(ActionRow.of(PacCommands.openStoreButtons())).build()).queue();
+    }
+
     public void updateCommands() {
         Guild guild = guild();
-        guild.updateCommands().queue();
+      /*   Commands.slash("pac", "All commands related to PAC (Property Advisor Credits).").
+                addSubcommands(new SubcommandData("daily", "Claim your daily free PAC. Resets at 8:00am UTC everyday."),
+                        new SubcommandData("send", "Send your PAC to another UPA member."). // TODO remove
+                                addOption(OptionType.USER, "member", "The member to send PAC to.", true).
+                                addOption(OptionType.STRING, "amount", "The amount of PAC to send.", true).
+                                addOption(OptionType.STRING, "reason", "The reason for sending PAC.", true))).queue();
+                                 guild.getTextChannelById(975506360231948288L).editMessageById(996389101915877386L, new MessageBuilder().
+                append("@everyone UPA is pleased to announce that we are starting a scholarship program for players that are of VISITOR rank.\n\n").
+                append("What is a scholar?\n", Formatting.BOLD, Formatting.UNDERLINE).
+                append("A scholar is any server member that is of VISITOR rank.\n\n").
+                append("How does it work?\n", Formatting.BOLD, Formatting.UNDERLINE).
+                append("Every month during spark week, one random scholar will be selected to be our sponsored scholar for the month. We will use sends to get our scholar to 10,000 networth so they can level up and get spark rewards. We will also continue to work directly with the scholar in further increasing their networth (if they desire).\n\n").
+                append("If you are a visitor interested in participating, all you have to do is register as a scholar. To do so use the /scholar command in the <#970917870320111666> channel. If you are selected, we will DM you and you will also be publicly notified in this channel. If no reply is received within 2 days then we will find another scholar to sponsor.\n\n").
+                append("Non-visitors can also use /list_scholars to see a list of current scholars awaiting our scholarship. Feel free to help them out with sends and earn PAC!\n\n").
+                append("The next sponsored scholar will be chosen on TBA \n\n").
+                append("Requirements\n", Formatting.BOLD, Formatting.UNDERLINE).
+                append("- Must be of VISITOR rank (< 10,000 networth)\n").
+                append("- Must have at least 5k networth\n").
+                append("- Must be a member of this Discord server\n").setActionRows(ActionRow.of(
+                        ScholarshipCommand.becomeAScholarButton(),
+                        Button.of(ButtonStyle.PRIMARY, "view_scholar_list", "View scholar list", Emoji.fromUnicode("U+1F4CB")),
+                        Button.of(ButtonStyle.PRIMARY, "view_leaderboard", "View leaderboard", Emoji.fromUnicode("U+1F947"))
+                )).build()).queue();
+      guild.updateCommands().queue();
         guild.upsertCommand(Commands.user("View PAC")).queue();
+        guild.upsertCommand(Commands.user("View node properties")).queue();
         guild.upsertCommand(Commands.user("Tip 250 PAC")).queue();
         guild.upsertCommand(Commands.user("Give PAC [Admin]")).queue();
 
         guild.upsertCommand(Commands.slash("scholarships", "All scholarship related commands.")).queue();
 
-        guild.upsertCommand(Commands.slash("pac", "All commands related to PAC (Property Advisor Credits).").
-                addSubcommands(new SubcommandData("daily", "Claim your daily free PAC. Resets at 8:00am UTC everyday."),
-                        new SubcommandData("send", "Send your PAC to another UPA member."). // TODO remove
-                                addOption(OptionType.USER, "member", "The member to send PAC to.", true).
-                                addOption(OptionType.STRING, "amount", "The amount of PAC to send.", true).
-                                addOption(OptionType.STRING, "reason", "The reason for sending PAC.", true),
-                        new SubcommandData("store", "Purchase PAC using a variety of methods, or redeem PAC for rewards."))).queue();
+
 
         guild.upsertCommand(Commands.slash("admin", "All administrative commands.").
                 addSubcommands(new SubcommandData("panel", "View the admin panel."),
@@ -188,7 +240,7 @@ public final class DiscordService extends AbstractIdleService {
     }
 
     public void sendBotRequestsMsg(UpaMember requester, String assistanceWith, Consumer<Message> onSuccess) {
-        UpaBot.getDiscordService().guild().getTextChannelById(984551707176480778L).sendMessageEmbeds(
+        ctx.discord().guild().getTextChannelById(984551707176480778L).sendMessageEmbeds(
                 new EmbedBuilder()
                         .setDescription("<@" + requester.getMemberId() + "> needs assistance with " + assistanceWith + ".")
                         .setFooter("Note: Marking a request as completed will automatically award/take away PAC!")
@@ -199,7 +251,7 @@ public final class DiscordService extends AbstractIdleService {
     }
 
     public void sendUpxForPacMsg(UpaMember requester, int amount, int cost, Consumer<Message> onSuccess) {
-        UpaBot.getDiscordService().guild().getTextChannelById(984551707176480778L).sendMessageEmbeds(
+        ctx.discord().guild().getTextChannelById(984551707176480778L).sendMessageEmbeds(
                 new EmbedBuilder()
                         .setDescription("<@" + requester.getMemberId() + "> needs assistance with buying " + amount + " PAC for " + cost + " UPX.")
                         .setFooter("Note: Press reactions to mark as completed or assign yourself.")
@@ -210,7 +262,7 @@ public final class DiscordService extends AbstractIdleService {
     }
 
     public void sendPropertyForPacMsg(UpaMember requester, UpaPoolProperty property, Consumer<Message> onSuccess) {
-        UpaBot.getDiscordService().guild().getTextChannelById(984551707176480778L).sendMessageEmbeds(
+        ctx.discord().guild().getTextChannelById(984551707176480778L).sendMessageEmbeds(
                 new EmbedBuilder()
 //                        .setDescription("<@" + requester.getMemberId() + "> needs assistance with " + assistanceWith + ".")
                         .setFooter("Note: Press reactions to mark as completed or assign yourself.")
@@ -221,7 +273,7 @@ public final class DiscordService extends AbstractIdleService {
     }
 
     public void sendFeedbackOrBugMsg(UpaMember requester, String subject, String description, Consumer<Message> onSuccess) {
-        UpaBot.getDiscordService().guild().getTextChannelById(984551707176480778L).sendMessageEmbeds(
+        ctx.discord().guild().getTextChannelById(984551707176480778L).sendMessageEmbeds(
                 new EmbedBuilder().setTitle(subject)
                         .addField("Sent by", "<@" + requester.getMemberId() + ">", false)
                         .setDescription(description)
@@ -237,7 +289,7 @@ public final class DiscordService extends AbstractIdleService {
 
     public void sendCreditMessage(CreditTransaction transaction) {
         if (transaction.getTransactionType() == CreditTransactionType.DAILY) {
-            requireNonNull(UpaBot.getDiscordService().guild().getTextChannelById("983628894919860234")).sendMessage(transaction.getReason()).queue();
+            requireNonNull(ctx.discord().guild().getTextChannelById("983628894919860234")).sendMessage(transaction.getReason()).queue();
         } else {
             Color color;
             if (transaction.getTransactionType() == CreditTransactionType.GIFTED) {
@@ -250,7 +302,7 @@ public final class DiscordService extends AbstractIdleService {
             } else {
                 color = Color.GREEN;
             }
-            requireNonNull(UpaBot.getDiscordService().guild().getTextChannelById("983628894919860234")).sendMessageEmbeds(new EmbedBuilder().
+            requireNonNull(ctx.discord().guild().getTextChannelById("983628894919860234")).sendMessageEmbeds(new EmbedBuilder().
                     setDescription(transaction.getReason())
                     .setColor(color)
                     .build()).queue();
@@ -263,7 +315,7 @@ public final class DiscordService extends AbstractIdleService {
             public Void execute(Connection connection) throws Exception {
                 try (PreparedStatement updateCredits = connection.prepareStatement("UPDATE members SET credit = credit + ? WHERE member_id = ?;")) {
                     for (CreditTransaction next : transactions) {
-                        if(next.getAmount() == 0) {
+                        if (next.getAmount() == 0) {
                             continue;
                         }
                         updateCredits.setInt(1, next.getAmount());
@@ -280,6 +332,25 @@ public final class DiscordService extends AbstractIdleService {
             next.getUpaMember().getCredit().addAndGet(next.getAmount());
             next.onSuccess();
             sendCreditMessage(next);
+            if (ThreadLocalRandom.current().nextInt(3) == 0) {
+                updatePacStats();
+            }
+            ctx.databaseCaching().getTotalPac().addAndGet(next.getAmount());
+            if (next.getTransactionType() != CreditTransactionType.GIFTED) {
+                ctx.variables().reports().accessValue(reportData -> {
+                    PendingWeeklyReport report = reportData.getReports().get(next.getUpaMember().getMemberId());
+                    if (report != null) {
+                        int amount = Math.abs(next.getAmount());
+                        if (next.getAmount() < 0) {
+                            report.getPacSpent().addAndGet(amount);
+                        } else {
+                            report.getPacGained().addAndGet(amount);
+                        }
+                        return true;
+                    }
+                    return false;
+                });
+            }
           /*  if ((next.getTransactionType() == CreditTransactionType.PURCHASE ||
                     next.getTransactionType() == CreditTransactionType.REDEEM) && next instanceof BotRequestTransaction) {
                 BotRequestTransaction transaction = (BotRequestTransaction) next;
@@ -290,7 +361,7 @@ public final class DiscordService extends AbstractIdleService {
     }
 
     public void sendCredit(CreditTransaction transaction) {
-        if(transaction.getAmount() == 0) {
+        if (transaction.getAmount() == 0) {
             return;
         }
         sendCredit(List.of(transaction));
@@ -306,7 +377,7 @@ public final class DiscordService extends AbstractIdleService {
         City city = requireNonNull(DataFetcherManager.getCityMap().get(sale.getCityId()),
                 "City [" + sale.getCityId() + "] does not exist for property ID [" + sale.getPropertyId() + "].");
         Guild guild = guild();
-        String floorType = SalesProcessorService.SELECTOR.getClass() == CityPropertySelector.class ? "city" : "neighborhood";
+        String floorType = ctx.salesProcessor().selector.getClass() == CityPropertySelector.class ? "city" : "neighborhood";
         String marginPrice = COMMA_FORMAT.format(notification.getMarginPrice());
         String marginPercentage = DECIMAL_FORMAT.format(notification.getMarginPercentage());
         String price = COMMA_FORMAT.format(sale.getPrice());

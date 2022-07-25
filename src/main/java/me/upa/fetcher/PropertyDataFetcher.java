@@ -69,7 +69,8 @@ public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
             String status = data.get("status").getAsString();
             JsonElement buildingData = data.get("building");
             String transactionId = data.get("transaction_id").getAsString();
-            String lastTransactionId = data.get("last_transaction_id").getAsString();
+            JsonElement lastTrxId = data.get("last_transaction_id");
+            String lastTransactionId = lastTrxId.isJsonNull() ? null : lastTrxId.getAsString();
             int price = data.get("price").getAsInt();
             double yieldPerHour = data.get("yield_per_hour").getAsDouble();
             int mintPrice = (int) Math.floor((yieldPerHour * 24 * 30) * 82.671);

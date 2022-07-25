@@ -1,7 +1,7 @@
 package me.upa.discord.command;
 
 import com.google.common.primitives.Ints;
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.CreditTransaction;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.UpaMember;
@@ -19,18 +19,27 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class AdminCommands extends ListenerAdapter {
 
+    /**
+     * The context.
+     */
+    private final UpaBotContext ctx;
+
+    public AdminCommands(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
 
     @Override
     public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
         if (event.getName().equals("admin")) {
             switch (event.getSubcommandName()) {
                 case "give_credit":
-                    handleGiveCredit(event, event.getOptions().get(0).getAsMember(),
+                    handleGiveCredit(ctx, event, event.getOptions().get(0).getAsMember(),
                             event.getOptions().get(1).getAsLong(),
                             event.getOptions().get(2).getAsString().trim());
                     break;
                 case "force_link":
-                    LinkCommand.handleLinkCommand(event, event.getOptions().get(0).getAsString(), event.getOptions().get(1).getAsMember().getIdLong());
+                    LinkCommand.handleLinkCommand(ctx, event, event.getOptions().get(0).getAsString(),
+                            event.getOptions().get(1).getAsMember().getIdLong());
                     break;
                 case "send_message":
                     handleSendMessage(event);
@@ -39,19 +48,19 @@ public final class AdminCommands extends ListenerAdapter {
         }
     }
 
-    public static void handleGiveCredit(IReplyCallback event, Member discordMember, long enteredAmount, String enteredReason) {
+    public static void handleGiveCredit(UpaBotContext ctx, IReplyCallback event, Member discordMember, long enteredAmount, String enteredReason) {
         if (discordMember == null) {
             event.reply("Member does not exist on this server.").setEphemeral(true).queue();
             return;
         }
         int amount = Ints.checkedCast(enteredAmount);
-        UpaMember member = UpaBot.getDatabaseCachingService().getMembers().get(discordMember.getIdLong());
+        UpaMember member = ctx.databaseCaching().getMembers().get(discordMember.getIdLong());
         if (member == null) {
             event.reply("Member ID is invalid or the member hasn't used /account yet. You can force link them using /admin force_link.").setEphemeral(true).queue();
             return;
         }
         event.reply("Sending " + amount + " PAC to " + member.getInGameName() + ". Please verify if it was successful in <#983628894919860234>.").setEphemeral(true).queue();
-        UpaBot.getDiscordService().sendCredit(new CreditTransaction(member, amount, CreditTransactionType.GIFTED, enteredReason));
+        ctx.discord().sendCredit(new CreditTransaction(member, amount, CreditTransactionType.GIFTED, enteredReason));
     }
 
     private void handleSendMessage(SlashCommandInteractionEvent event) {

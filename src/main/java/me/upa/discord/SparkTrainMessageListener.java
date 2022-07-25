@@ -2,7 +2,7 @@ package me.upa.discord;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.primitives.Longs;
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.game.Structure;
 import me.upa.service.DatabaseCachingService;
 import me.upa.service.SparkTrainMicroService.SparkTrainMember;
@@ -53,6 +53,10 @@ import static me.upa.discord.DiscordService.DECIMAL_FORMAT;
  */
 public final class SparkTrainMessageListener extends ListenerAdapter {
 
+    public SparkTrainMessageListener(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
+
     private static final class PropertyRequest {
         private final long propertyId;
         private final boolean firstBuild;
@@ -74,10 +78,9 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
     private static final int EXPECTED_MESSAGES = 2;
 
     /**
-     * The amount of SSH required to become a member.
+     * The context.
      */
-    private static final int SPARK_HOURS_THROTTLE = 100;
-
+    private final UpaBotContext ctx;
     private final Map<Long, PropertyRequest> propertyRequests = new ConcurrentHashMap<>();
     private final AtomicReference<String> listeningFor = new AtomicReference<>();
     private final AtomicInteger currentMessage = new AtomicInteger();
@@ -90,7 +93,7 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
     public void onButtonInteraction(@NotNull ButtonInteractionEvent event) {
         switch (event.getButton().getId()) {
             case "confirm_cancel_a_build":
-                if (UpaBot.getSparkTrainMicroService().getBuildRequests().containsKey(event.getMember().getIdLong())) {
+                if (ctx.sparkTrain().getBuildRequests().containsKey(event.getMember().getIdLong())) {
                     event.deferReply(true).queue();
                     SqlConnectionManager.getInstance().execute(new SqlTask<Void>() {
                         @Override
@@ -104,10 +107,10 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                             return null;
                         }
                     }, success -> {
-                        UpaBot.getSparkTrainMicroService().getBuildRequests().remove(event.getMember().getIdLong());
+                        ctx.sparkTrain().getBuildRequests().remove(event.getMember().getIdLong());
                         event.getHook().setEphemeral(true).editOriginal("Your build request has successfully been cancelled.").queue();
                         event.getInteraction().editButton(event.getButton().asDisabled()).queue();
-                        UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessage(event.getMember().getAsMention() + " has cancelled their build request!").queue();
+                        ctx.discord().guild().getTextChannelById(963112034726195210L).sendMessage(event.getMember().getAsMention() + " has cancelled their build request!").queue();
                     });
                 }
                 break;
@@ -116,15 +119,15 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                         addActionRow(Button.of(ButtonStyle.DANGER, "confirm_cancel_a_build", "Yes", Emoji.fromUnicode("U+2705"))).setEphemeral(true).queue();
                 break;
             case "request_a_build":
-                UpaMember requester = UpaBot.getDatabaseCachingService().getMembers().get(event.getMember().getIdLong());
+                UpaMember requester = ctx.databaseCaching().getMembers().get(event.getMember().getIdLong());
                 if (requester == null) {
                     event.reply("You must be a member to request a build.").setEphemeral(true).queue();
                     return;
-                } else if (UpaBot.getSparkTrainMicroService().hasActiveBuild(event.getMember().getIdLong())) {
+                } else if (ctx.sparkTrain().hasActiveBuild(event.getMember().getIdLong())) {
                     event.reply("You have already requested a build. Please cancel first before requesting another.").setEphemeral(true).queue();
                     return;
                 }
-                Set<UpaProperty> propertiesOwned = UpaBot.getDatabaseCachingService().getMemberProperties().get(requester.getKey());
+                Set<UpaProperty> propertiesOwned = ctx.databaseCaching().getMemberProperties().get(requester.getKey());
                 if (propertiesOwned.isEmpty()) {
                     event.reply("You must own at least 1 property in Hollis to request a build.").setEphemeral(true).queue();
                 } else {
@@ -149,33 +152,28 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                 break;
             case "spark_train_position":
                 long memberId = event.getMember().getIdLong();
-                UpaMember upaMember = UpaBot.getDatabaseCachingService().getMembers().get(memberId);
+                UpaMember upaMember = ctx.databaseCaching().getMembers().get(memberId);
                 if (upaMember == null) {
                     event.reply("You must link with UPA using /account before you can do this.").setEphemeral(true).queue();
                     return;
                 }
                 int place = upaMember.getSparkTrainPlace().get();
-                double sparkTrainSsh = upaMember.getSparkTrainSsh().get();
                 if (place == 0) {
-                    if (sparkTrainSsh == 0) {
-                        event.reply("You must stake spark on one of the structures in <#963108957784772659> to join the spark train. Your SSH will remain even if you unstake your spark.").setEphemeral(true).queue();
-                    } else {
-                        event.reply("New UPA members must first earn " + SparkTrainMessageListener.SPARK_HOURS_THROTTLE).setEphemeral(true).queue();
-                    }
+                    event.reply("You must stake spark on one of the structures in <#963108957784772659> to join the spark train. Your SSH will remain even if you unstake your spark.").setEphemeral(true).queue();
                     return;
                 }
                 event.reply("Passenger #" + place + " with " + DiscordService.DECIMAL_FORMAT.format(upaMember.getTotalSsh()) + " SSH").setEphemeral(true).queue();
                 break;
             case "view_build_requests":
-                var requests = UpaBot.getSparkTrainMicroService().getBuildRequests().values();
+                var requests = ctx.sparkTrain().getBuildRequests().values();
                 if (requests.isEmpty()) {
                     event.reply("That's odd, there are no active build requests at the moment.").setEphemeral(true).queue();
                     return;
                 }
                 StringBuilder sb = new StringBuilder();
                 for (UpaBuildRequest buildRequest : requests) {
-                    UpaProperty property = UpaBot.getDatabaseCachingService().getProperties().get(buildRequest.getPropertyId());
-                    UpaMember member = UpaBot.getDatabaseCachingService().getMembers().get(buildRequest.getMemberId());
+                    UpaProperty property = ctx.databaseCaching().getProperties().get(buildRequest.getPropertyId());
+                    UpaMember member = ctx.databaseCaching().getMembers().get(buildRequest.getMemberId());
                     if (member == null) {
                         continue;
                     }
@@ -186,18 +184,18 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                 break;
             case "manage_build_request":
                 memberId = event.getMember().getIdLong();
-                upaMember = UpaBot.getDatabaseCachingService().getMembers().get(memberId);
+                upaMember = ctx.databaseCaching().getMembers().get(memberId);
                 if (upaMember == null) {
                     event.reply("Please become a member by using /account first.").setEphemeral(true).queue();
                     return;
                 }
-                if (UpaBot.getSparkTrainMicroService().hasActiveBuild(memberId)) {
+                if (ctx.sparkTrain().hasActiveBuild(memberId)) {
                     event.reply("You already have a build being staked on by the train.").setEphemeral(true).queue();
                     return;
                 }
                 double totalSsh = upaMember.getTotalSsh();
-                int leastRequiredSsh = UpaBot.getSparkTrainMicroService().getLeastRequiredSsh();
-                UpaBuildRequest buildRequest = UpaBot.getSparkTrainMicroService().getBuildRequests().get(event.getMember().getIdLong());
+                int leastRequiredSsh = ctx.sparkTrain().getLeastRequiredSsh();
+                UpaBuildRequest buildRequest = ctx.sparkTrain().getBuildRequests().get(event.getMember().getIdLong());
                 MessageBuilder mb = new MessageBuilder();
                 if (buildRequest != null) {
                     mb.append("You already have an active build request for **").
@@ -234,7 +232,7 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
             case "select_structure":
                 PropertyRequest request = propertyRequests.get(event.getMember().getIdLong());
                 String structureName = event.getInteraction().getValues().get(0);
-                Structure structure = UpaBot.getSparkTrainMicroService().getStructureData().get(structureName);
+                Structure structure = ctx.sparkTrain().getStructureData().get(structureName);
 
                 if (request == null) {
                     event.reply("Bot has been restarted. Please try again.").setEphemeral(true).queue();
@@ -244,21 +242,21 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                     event.reply("Invalid structure selected.").setEphemeral(true).queue();
                     return;
                 }
-                UpaMember mem = UpaBot.getDatabaseCachingService().getMembers().get(event.getMember().getIdLong());
+                UpaMember mem = ctx.databaseCaching().getMembers().get(event.getMember().getIdLong());
                 if (mem == null) {
                     event.reply("Invalid member ID.").setEphemeral(true).queue();
                     return;
                 }
                 double ssh = mem.getTotalSsh();
                 int sshNeeded = structure.getSshRequired();
-                if (request.firstBuild) {
+                if (request.firstBuild && structure.getName().equals("Small Town House")) {
                     sshNeeded = structure.getSshRequired() / 2;
                 }
                 if (ssh < sshNeeded) {
                     event.reply("You need an additional **" + DiscordService.COMMA_FORMAT.format(sshNeeded - ssh) + " SSH** in order to request this kind of build.").setEphemeral(true).queue();
                     return;
                 }
-                UpaProperty buildRequestProp = UpaBot.getDatabaseCachingService().getProperties().get(request.propertyId);
+                UpaProperty buildRequestProp = ctx.databaseCaching().getProperties().get(request.propertyId);
                 if (buildRequestProp == null) {
                     event.reply("Your requested property could not be found in our databases.").setEphemeral(true).queue();
                     return;
@@ -285,8 +283,8 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                     propertyRequests.remove(event.getMember().getIdLong());
                     event.getHook().setEphemeral(true).editOriginal("You have successfully secured your build request. It should appear in <#990518630129221652> and <#963112034726195210> shortly.\n\nPlease start your build as soon as possible, or you may be skipped!").queue();
                     event.getInteraction().editSelectMenu(null).queue();
-                    UpaBot.getSparkTrainMicroService().getBuildRequests().put(event.getMember().getIdLong(), new UpaBuildRequest(mem.getMemberId(), request.propertyId, structureName));
-                    UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessage("<@" + mem.getMemberId() + "> has requested structure '" + structureName + "' on **" + buildRequestProp.getAddress() + "**.").queue();
+                    ctx.sparkTrain().getBuildRequests().put(event.getMember().getIdLong(), new UpaBuildRequest(mem.getMemberId(), request.propertyId, structureName));
+                    ctx.discord().guild().getTextChannelById(963112034726195210L).sendMessage("<@" + mem.getMemberId() + "> has requested structure '" + structureName + "' on **" + buildRequestProp.getAddress() + "**.").queue();
                 });
                 break;
         }
@@ -354,7 +352,7 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                         return;
                     }
                     status = status.equals("completed") ? "Completed" : status.equals("building") ? "In progress" : "Not started";
-                    String currentStatus = UpaBot.getDatabaseCachingService().getConstructionStatus().get(address);
+                    String currentStatus = ctx.databaseCaching().getConstructionStatus().get(address);
                     if (currentStatus == null || !currentStatus.equals(status)) {
                         statusMap.put(address, status);
                     }
@@ -376,11 +374,11 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                     if (BLACKLISTED.contains(inGameName)) {
                         return;
                     }
-                    Long memberId = UpaBot.getDatabaseCachingService().getMemberNames().inverse().get(inGameName);
+                    Long memberId = ctx.databaseCaching().getMemberNames().inverse().get(inGameName);
                     if (memberId == null) {
                         return;
                     }
-                    UpaMember upaMember = UpaBot.getDatabaseCachingService().getMembers().get(memberId);
+                    UpaMember upaMember = ctx.databaseCaching().getMembers().get(memberId);
                     upaMember.getSparkTrainSsh().set(sh2o - shfo);
                     SparkTrainMember nextMember = new SparkTrainMember(inGameName, stake, building, completed, sh2o, shfo, upaMember);
                     members.add(nextMember);
@@ -388,7 +386,7 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                     throw new IllegalStateException("Invalid token count.");
                 }
             };
-            finished = () -> UpaBot.getSparkTrainMicroService().editComment(buildMessage(), success -> {
+            finished = () -> ctx.sparkTrain().editComment(buildMessage(), success -> {
             });
         } else {
             listeningFor.set(null);
@@ -432,7 +430,7 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
                         updateProperty.addBatch();
                     }
                     if (updateProperty.executeBatch().length == statusMap.size()) {
-                        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+                        DatabaseCachingService databaseCaching = ctx.databaseCaching();
                         for (var nextEntry : statusMap.entrySet()) {
                             databaseCaching.getConstructionStatus().put(nextEntry.getKey(), nextEntry.getValue());
                             databaseCaching.getProperties().values().stream().
@@ -448,7 +446,7 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
 
     private Message buildMessage() {
         int place = 1;
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         StringBuilder sb = new StringBuilder();
         int stopLength = 0;
         for (SparkTrainMember nextMember : members) {
@@ -481,12 +479,12 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
             failed.accept("Invalid property ID. Please try again.");
             return;
         }
-        UpaProperty upaProp = UpaBot.getDatabaseCachingService().getProperties().get(propertyId);
+        UpaProperty upaProp = ctx.databaseCaching().getProperties().get(propertyId);
         if (upaProp == null) {
             failed.accept("Must be a registered Hollis property that you own. Please try again.");
             return;
         }
-        UpaMember upaMember = UpaBot.getDatabaseCachingService().getMembers().get(memberId);
+        UpaMember upaMember = ctx.databaseCaching().getMembers().get(memberId);
         if (upaMember == null) {
             failed.accept("Please become a UPA member by using /account first.");
             return;
@@ -495,17 +493,17 @@ public final class SparkTrainMessageListener extends ListenerAdapter {
             failed.accept("You do not own this property.");
             return;
         }
-        boolean firstBuild = UpaBot.getDatabaseCachingService().getMemberProperties().get(upaProp.getMemberKey()).stream().
+        boolean firstBuild = ctx.databaseCaching().getMemberProperties().get(upaProp.getMemberKey()).stream().
                 noneMatch(next -> next.getBuildStatus().get().equals("Completed"));
         SelectMenu.Builder selectStructureBldr = SelectMenu.create("select_structure");
-        for (Structure structure : UpaBot.getSparkTrainMicroService().getSuitableStructures(upaProp.getUp2())) {
-            selectStructureBldr.addOption(structure.getName() + " (" + (firstBuild ? (structure.getSshRequired() / 2) : structure.getSshRequired()) + " SSH)", structure.getName());
+        for (Structure structure : ctx.sparkTrain().getSuitableStructures(upaProp.getUp2())) {
+            selectStructureBldr.addOption(structure.getName() + " (" + (firstBuild && structure.getName().equals("Small Town House") ? (structure.getSshRequired() / 2) : structure.getSshRequired()) + " SSH)", structure.getName());
         }
 
         propertyRequests.put(memberId, new PropertyRequest(propertyId, firstBuild));
         String message = "Please select which structure you'd like to build on **" + upaProp.getAddress() + "**.";
         if (firstBuild) {
-            message += " If this is your first build, you only require half the amount of SSH.";
+            message += " If this is your first build, you only require half the amount of SSH for small townhouses.";
         }
         finish.accept(message, selectStructureBldr);
     }

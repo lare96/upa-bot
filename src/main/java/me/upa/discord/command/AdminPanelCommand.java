@@ -1,16 +1,17 @@
 package me.upa.discord.command;
 
-import com.google.common.collect.ConcurrentHashMultiset;
-import com.google.common.collect.Multiset;
+import com.google.common.base.Stopwatch;
 import com.google.common.primitives.Ints;
-import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.CreditTransaction;
 import me.upa.discord.CreditTransaction.CreditTransactionType;
+import me.upa.discord.DiscordService;
 import me.upa.discord.Scholar;
 import me.upa.discord.UpaMember;
-import me.upa.discord.UpaProperty;
-import me.upa.fetcher.PropertyDataFetcher;
-import me.upa.game.Property;
+import me.upa.fetcher.PurchasesBlockchainDataFetcher;
+import me.upa.fetcher.SalesBlockchainDataFetcher;
+import me.upa.game.BlockchainPurchase;
+import me.upa.game.BlockchainSale;
 import me.upa.service.DatabaseCachingService;
 import me.upa.sql.SqlConnectionManager;
 import me.upa.sql.SqlTask;
@@ -36,19 +37,16 @@ import org.jetbrains.annotations.NotNull;
 import java.awt.*;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -60,6 +58,10 @@ public final class AdminPanelCommand extends ListenerAdapter {
     private static final Emoji BLUE_SQUARE_EMOJI = Emoji.fromUnicode("U+1F7E6");
 
     private static final Logger logger = LogManager.getLogger();
+
+    public AdminPanelCommand(UpaBotContext ctx) {
+        this.ctx = ctx;
+    }
 
     // 0 cubes = lose all of your reward
     private static final class SortedUpaMember implements Comparable<SortedUpaMember> {
@@ -115,6 +117,11 @@ public final class AdminPanelCommand extends ListenerAdapter {
         }
     }
 
+    /**
+     * The context.
+     */
+    private final UpaBotContext ctx;
+
     // private final ScheduledExecutorService service = Executors.newSingleThreadScheduledExecutor();
     private void gamble(ButtonInteractionEvent event, int amount) {
         boolean won = ThreadLocalRandom.current().nextInt(100) < 35;
@@ -125,26 +132,15 @@ public final class AdminPanelCommand extends ListenerAdapter {
                 setActionRows(ActionRow.of(Button.of(ButtonStyle.SUCCESS, "try_again", "Try again", Emoji.fromUnicode("U+2705")))).build()).queue();
     }
 
+
     @Override
     public void onButtonInteraction(@NotNull ButtonInteractionEvent event) {
         if (event.getButton().getId() == null)
             return;
         switch (event.getButton().getId()) {
             case "test_feature":
-                Set<Long> members = Set.of(901726930439634975L,
-                        540938577572397059L,
-                        635956007872495617L,
-                        475003272034385930L,
-                        741856765536370728L,
-                        958582971084963840L,
-                        220622659665264643L,
-                        200653175127146501L,
-                        792154216361492560L,
-                        960498550704316437L,
-                        688617191402504219L,
-                        182541980700508160L);
-                UpaBot.getDiscordService().sendCredit(members.stream().map(next -> new CreditTransaction(UpaBot.getDatabaseCachingService().getMembers().get(next), 200, CreditTransactionType.EVENT, "the **Send Storm Event**")).collect(Collectors.toList()));
-                    event.reply("Done").setEphemeral(true).queue();
+                event.reply("Blockchain synchronization @ "+ctx.variables().lastBlockchainFetch().getValue()+"\nTotal records: "+
+                        DiscordService.COMMA_FORMAT.format(ctx.databaseCaching().getPropertyLookup().size())).setEphemeral(true).queue();
                 /*    event.reply("How much PAC would you like to wager? (PAC will not be taken while in TEST mode)\n\n"+
                         BLUE_SQUARE_EMOJI.getAsMention()+""+BLUE_SQUARE_EMOJI.getAsMention()+""+BLUE_SQUARE_EMOJI.getAsMention()+" = Win double your PAC!\nAnything else=").addActionRow(
                         Button.of(ButtonStyle.PRIMARY, "wager_100", "Wager 100 PAC", Emoji.fromUnicode("U+1F4B5")),
@@ -164,11 +160,11 @@ public final class AdminPanelCommand extends ListenerAdapter {
         }
         switch (event.getButton().getId()) {
             case "create_send_storm":
-                UpaBot.getDiscordService().guild().getTextChannelById(982800525386993694L).sendMessage("").queue();
+                ctx.discord().guild().getTextChannelById(982800525386993694L).sendMessage("").queue();
                 break;
             case "update_commands":
                 event.reply("Done. Please give up to 10 minutes for commands to synchronize.").setEphemeral(true).queue();
-                UpaBot.getDiscordService().updateCommands();
+                ctx.discord().updateCommands();
                 break;
             case "confirm_award_scholar":
                 event.reply("Done.").setEphemeral(true).queue();
@@ -181,7 +177,7 @@ public final class AdminPanelCommand extends ListenerAdapter {
                 break;
             case "credit_balance":
                 event.deferReply().setEphemeral(true).queue();
-                var memberList = UpaBot.getDatabaseCachingService().getMembers().values();
+                var memberList = ctx.databaseCaching().getMembers().values();
                 List<SortedUpaMember> sortedUpaMembers = new ArrayList<>(memberList.size());
                 for (UpaMember upaMember : memberList) {
                     int credit = upaMember.getCredit().get();
@@ -198,7 +194,7 @@ public final class AdminPanelCommand extends ListenerAdapter {
                 event.getHook().setEphemeral(true).sendMessage(sb.toString()).queue();
                 break;
             case "set_lottery_jackpot":
-                if (UpaBot.variables().lottery().getValue() == null) {
+                if (ctx.variables().lottery().getValue() == null) {
                     event.reply("No lottery active atm.").setEphemeral(true).queue();
                     break;
                 }
@@ -206,7 +202,7 @@ public final class AdminPanelCommand extends ListenerAdapter {
                         addActionRow(TextInput.create("set_lottery_jackpot_form_amount", "Amount", TextInputStyle.SHORT).setRequired(true).setPlaceholder("500").build()).build()).queue();
                 break;
             case "full_spark_train":
-                String lastTrain = UpaBot.getDiscordService().getSparkTrain().getLastSparkTrain();
+                String lastTrain = ctx.discord().getSparkTrain().getLastSparkTrain();
                 if (lastTrain == null) {
                     event.reply("No train string generated?").setEphemeral(true).queue();
                     return;
@@ -224,9 +220,9 @@ public final class AdminPanelCommand extends ListenerAdapter {
                 event.reply("Incorrect amount entered.").setEphemeral(true).queue();
                 return;
             }
-            UpaBot.variables().lottery().accessValue(currentLottery -> {
+            ctx.variables().lottery().accessValue(currentLottery -> {
                 currentLottery.getPac().set(amount);
-                UpaBot.getPacLotteryMicroService().sendMessage();
+                ctx.lottery().sendMessage();
                 event.reply("Success!").setEphemeral(true).queue();
                 return true;
             });
@@ -234,7 +230,7 @@ public final class AdminPanelCommand extends ListenerAdapter {
     }
 
     private void handleAwardScholar(ButtonInteractionEvent event) {
-        DatabaseCachingService databaseCaching = UpaBot.getDatabaseCachingService();
+        DatabaseCachingService databaseCaching = ctx.databaseCaching();
         event.deferReply().setEphemeral(true).queue();
         Collection<Scholar> scholars = databaseCaching.getScholars().values();
         Set<Scholar> eligible = new HashSet<>();
@@ -267,7 +263,7 @@ public final class AdminPanelCommand extends ListenerAdapter {
 
         SqlConnectionManager.getInstance().execute(new SponsorScholarTask(memberId),
                 success -> {
-                    Guild guild = UpaBot.getDiscordService().guild();
+                    Guild guild = ctx.discord().guild();
                     guild.getTextChannelById(975506360231948288L).
                             sendMessage("The scholarship program for this month has concluded. The sponsored scholar is <@" + memberId + ">, congratulations! All linked members will receive bonus PAC for sending to the sponsor.").queue();
                     event.getHook().editOriginal("Success!").queue();

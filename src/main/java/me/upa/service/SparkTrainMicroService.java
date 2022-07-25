@@ -1,9 +1,9 @@
 package me.upa.service;
 
-import com.fasterxml.jackson.databind.annotation.JsonAppend.Prop;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import me.upa.UpaBot;
+import me.upa.UpaBotContext;
 import me.upa.discord.DiscordService;
 import me.upa.discord.UpaBuildRequest;
 import me.upa.discord.UpaBuildSlot;
@@ -36,21 +36,16 @@ import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static me.upa.discord.DiscordService.DECIMAL_FORMAT;
@@ -158,18 +153,20 @@ public final class SparkTrainMicroService extends MicroService {
     private final ConcurrentLinkedQueue<UpaBuildSlot> buildSlots = new ConcurrentLinkedQueue<>();
     private volatile State currentState = State.SPARK_TRAIN;
     private volatile Instant lastAnnouncement = Instant.now();
+    private final UpaBotContext ctx;
 
-    public SparkTrainMicroService() {
+    public SparkTrainMicroService(UpaBotContext ctx) {
         super(Duration.ofMinutes(1));
+        this.ctx = ctx;
     }
 
     @Override
     public void startUp() throws Exception {
-        ConcurrentLinkedQueue<UpaBuildSlot> loadedBuildQueue = Files.exists(BUILDS_PATH) ? UpaBot.load(BUILDS_PATH) : null;
+        ConcurrentLinkedQueue<UpaBuildSlot> loadedBuildQueue = Files.exists(BUILDS_PATH) ? ctx.load(BUILDS_PATH) : null;
         if (loadedBuildQueue != null) {
             buildSlots.addAll(loadedBuildQueue);
         }
-        DiscordService discordService = UpaBot.getDiscordService();
+        DiscordService discordService = ctx.discord();
         Message message = discordService.guild().getTextChannelById(990518630129221652L).retrieveMessageById(COMMENT_ID).complete();
         if (message == null) {
             throw new Exception("No spark train comment.");
@@ -183,7 +180,7 @@ public final class SparkTrainMicroService extends MicroService {
                 long memberId = results.getLong(1);
                 long propertyId = results.getLong(2);
                 String structureName = results.getString(3);
-                String address = UpaBot.getDatabaseCachingService().getProperties().get(propertyId).getAddress();
+                String address = ctx.databaseCaching().getProperties().get(propertyId).getAddress();
                 UpaBuildRequest request = new UpaBuildRequest(memberId, propertyId, structureName);
                 request.setAddress(address);
                 buildRequests.put(memberId, request);
@@ -197,24 +194,24 @@ public final class SparkTrainMicroService extends MicroService {
     public void run() throws Exception {
         switch (currentState) {
             case SPARK_TRAIN:
-                if (UpaBot.getDiscordService().getSparkTrain().getListeningFor().compareAndSet(null, "!statistic all")) {
-                    UpaBot.getDiscordService().guild().getTextChannelById(979640542805782568L).sendMessage("!statistic all").queue();
+                if (ctx.discord().getSparkTrain().getListeningFor().compareAndSet(null, "!statistic all")) {
+                    ctx.discord().guild().getTextChannelById(979640542805782568L).sendMessage("!statistic all").queue();
                 }
                 currentState = State.STRUCTURES;
                 break;
             case STRUCTURES:
-                if (UpaBot.getDiscordService().getSparkTrain().getListeningFor().compareAndSet(null, "!list all:hollis-queens")) {
-                    UpaBot.getDiscordService().guild().getTextChannelById(979640542805782568L).sendMessage("!list all:hollis-queens").queue();
+                if (ctx.discord().getSparkTrain().getListeningFor().compareAndSet(null, "!list all:hollis-queens")) {
+                    ctx.discord().guild().getTextChannelById(979640542805782568L).sendMessage("!list all:hollis-queens").queue();
                 }
                 currentState = State.ROLES;
                 break;
             case ROLES:
-                Role staker = UpaBot.getDiscordService().guild().getRoleById(965427810707595394L);
-                for (UpaMember upaMember : UpaBot.getDatabaseCachingService().getMembers().values()) {
+                Role staker = ctx.discord().guild().getRoleById(965427810707595394L);
+                for (UpaMember upaMember : ctx.databaseCaching().getMembers().values()) {
                     if (upaMember.getSparkTrainPlace().get() > 0) {
-                        UpaBot.getDiscordService().guild().addRoleToMember(UserSnowflake.fromId(upaMember.getMemberId()), staker).queue();
+                        ctx.discord().guild().addRoleToMember(UserSnowflake.fromId(upaMember.getMemberId()), staker).queue();
                     } else {
-                        UpaBot.getDiscordService().guild().removeRoleFromMember(UserSnowflake.fromId(upaMember.getMemberId()), staker).queue();
+                        ctx.discord().guild().removeRoleFromMember(UserSnowflake.fromId(upaMember.getMemberId()), staker).queue();
                     }
                 }
                 currentState = State.REQUESTS;
@@ -224,20 +221,20 @@ public final class SparkTrainMicroService extends MicroService {
                 updateBuildSlots();
 
                 // Attempt to add to the build queue.
-                Collection<UpaBuildRequest> existingRequests = UpaBot.getSparkTrainMicroService().getBuildRequests().values();
+                Collection<UpaBuildRequest> existingRequests = ctx.sparkTrain().getBuildRequests().values();
                 if (!existingRequests.isEmpty()) {
                     // Sort all requests from highest -> lowest SSH.
                     List<UpaBuildRequest> requests = new ArrayList<>(existingRequests);
                     requests.sort((o1, o2) -> {
-                        double o1Ssh = UpaBot.getDatabaseCachingService().getMembers().get(o1.getMemberId()).getTotalSsh();
-                        double o2Ssh = UpaBot.getDatabaseCachingService().getMembers().get(o2.getMemberId()).getTotalSsh();
+                        double o1Ssh = ctx.databaseCaching().getMembers().get(o1.getMemberId()).getTotalSsh();
+                        double o2Ssh = ctx.databaseCaching().getMembers().get(o2.getMemberId()).getTotalSsh();
                         return Double.compare(o2Ssh, o1Ssh);
                     });
 
                     try {
                         // Genesis properties come first.
                         for (UpaBuildRequest buildRequest : requests) {
-                            UpaProperty property = UpaBot.getDatabaseCachingService().getProperties().get(buildRequest.getPropertyId());
+                            UpaProperty property = ctx.databaseCaching().getProperties().get(buildRequest.getPropertyId());
                             if (property != null && property.isGenesis()) {
                                 if (!addBuildSlot(buildRequest, property)) {
                                     break;
@@ -247,7 +244,7 @@ public final class SparkTrainMicroService extends MicroService {
 
                         // No genesis properties were found, check all others.
                         for (UpaBuildRequest buildRequest : requests) {
-                            UpaProperty property = UpaBot.getDatabaseCachingService().getProperties().get(buildRequest.getPropertyId());
+                            UpaProperty property = ctx.databaseCaching().getProperties().get(buildRequest.getPropertyId());
                             if (property != null) {
                                 if (!addBuildSlot(buildRequest, property)) {
                                     break;
@@ -255,7 +252,7 @@ public final class SparkTrainMicroService extends MicroService {
                             }
                         }
                     } finally {
-                        UpaBot.save(BUILDS_PATH, buildSlots);
+                        ctx.save(BUILDS_PATH, buildSlots);
                     }
                 }
                 currentState = State.SPARK_TRAIN;
@@ -265,7 +262,7 @@ public final class SparkTrainMicroService extends MicroService {
     }
 
     public void editComment(Message content, Consumer<Message> onSuccess) {
-        UpaBot.getDiscordService().guild().getTextChannelById(990518630129221652L).retrieveMessageById(COMMENT_ID).queue(success -> success.editMessage(content).queue(onSuccess));
+        ctx.discord().guild().getTextChannelById(990518630129221652L).retrieveMessageById(COMMENT_ID).queue(success -> success.editMessage(content).queue(onSuccess));
     }
 
     private volatile Structure leastRequiredSsh;
@@ -335,15 +332,15 @@ public final class SparkTrainMicroService extends MicroService {
                 throw new IllegalStateException("Could not load next property for build slot.");
             }
             if (property.getFinishedAt() == null) {
-                String msg = "Please start construction of **" + request.getStructureName() + "** on **" + property.getFullAddress() + "** to be accepted onto the build queue.";
                 if (request.getNotified().compareAndSet(false, true)) {
-                    UpaBot.getDiscordService().guild().retrieveMemberById(request.getMemberId()).queue(success -> {
+                    String msg = "Please start construction of **" + request.getStructureName() + "** on **" + property.getFullAddress() + "** to be accepted onto the build queue.";
+                    ctx.discord().guild().retrieveMemberById(request.getMemberId()).queue(success -> {
                         success.getUser().openPrivateChannel().queue(privateChannel ->
                                 privateChannel.sendMessage(msg).queue());
-                        UpaBot.getDiscordService().guild().getTextChannelById(963112034726195210L).sendMessage(success.getAsMention() + " " + msg).queue();
+                        ctx.discord().guild().getTextChannelById(963112034726195210L).sendMessage(success.getAsMention() + " " + msg).queue();
                     });
                 }
-                return false;
+                return true;
             }
             try (Connection connection = SqlConnectionManager.getInstance().take();
                  PreparedStatement ps = connection.prepareStatement("DELETE FROM build_requests WHERE member_id = ?;")) {
@@ -351,7 +348,7 @@ public final class SparkTrainMicroService extends MicroService {
                 if (ps.executeUpdate() == 1) {
                     buildSlots.add(new UpaBuildSlot(request.getMemberId(), request.getPropertyId(), request.getStructureName(), property.getFullAddress(), property.getMaxStakedSpark(), property.getFinishedAt(), property.getStakedSpark(), property.getBuildPercentage()));
                     buildRequests.remove(request.getMemberId());
-                    UpaBot.getDiscordService().guild().getTextChannelById(979640542805782568L).sendMessage("!add:hollis-queens:" + property.getFullAddress() + ",Queens").queue();
+                    ctx.discord().guild().getTextChannelById(979640542805782568L).sendMessage("!add:hollis-queens:" + property.getFullAddress() + ",Queens").queue();
                     return true;
                 }
             } catch (Exception e) {
@@ -393,7 +390,7 @@ public final class SparkTrainMicroService extends MicroService {
                         setColor(color).
                         build());
             }
-            UpaBot.getDiscordService().guild().getTextChannelById(963108957784772659L).
+            ctx.discord().guild().getTextChannelById(963108957784772659L).
                     retrieveMessageById(992885758581035181L).
                     queue(success -> success.editMessage(new MessageBuilder().append(":zap: :zap: ").
                             append("Where do I stake my spark?", Formatting.BOLD, Formatting.UNDERLINE).

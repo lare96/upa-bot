@@ -1,5 +1,6 @@
 package me.upa.selector;
 
+import me.upa.UpaBotContext;
 import me.upa.discord.SaleNotificationRequest;
 import me.upa.game.City;
 import me.upa.game.Sale;
@@ -12,6 +13,10 @@ public final class CityPropertySelector extends PropertySelector {
 
     private final List<Sale> oldSales = new ArrayList<>();
     private List<Sale> newSales;
+
+    public CityPropertySelector(UpaBotContext ctx) {
+        super(ctx);
+    }
 
     @Override
     List<SaleNotificationRequest> computeNotificationRequests(City city, Collection<Sale> sales) {
