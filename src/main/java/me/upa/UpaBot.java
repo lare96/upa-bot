@@ -1,5 +1,6 @@
 package me.upa;
 
+import me.upa.fetcher.ProfileDataFetcher;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -29,9 +30,10 @@ public final class UpaBot {
         logger.info("Starting UpaBot v1.0 services.");
 
         UpaBotContext ctx = new UpaBotContext();
+        ProfileDataFetcher.ctx = ctx;
         ctx.loadVariables();
         ctx.loadMicroServices();
-        ctx.loadServices();
+        ctx.startServices();
         ctx.discord().getStatisticsCommand().load();
     }
 
