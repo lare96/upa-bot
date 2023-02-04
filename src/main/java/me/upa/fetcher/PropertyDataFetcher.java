@@ -1,5 +1,6 @@
 package me.upa.fetcher;
 
+import com.google.common.primitives.Longs;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -11,19 +12,22 @@ import org.apache.logging.log4j.message.ParameterizedMessage;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
     private static final Logger logger = LogManager.getLogger();
 
-    public static Property fetchPropertySynchronous(long propertyId) throws Exception {
-        PropertyDataFetcher propertyFetcher = new PropertyDataFetcher();
-        propertyFetcher.fetch("https://api.upland.me/properties/" + propertyId);
-        return propertyFetcher.waitUntilDone();
+    public static long propertyIdForLink(String propertyLink) {
+        Long propertyId = Longs.tryParse(propertyLink.replace("https://play.upland.me/?prop_id=", "").trim());
+        if (propertyId == null) {
+            return -1;
+        }
+        return propertyId;
     }
-
-    public static Property fetchPropertySynchronous(String propertyId) throws Exception {
+// TODO check if temp can be used for all fetcges, always add to database after fetching. and retrieve instead of fetching
+    public static Property fetchPropertySynchronous(long propertyId) throws Exception {
         PropertyDataFetcher propertyFetcher = new PropertyDataFetcher();
         propertyFetcher.fetch("https://api.upland.me/properties/" + propertyId);
         return propertyFetcher.waitUntilDone();
@@ -42,6 +46,46 @@ public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
                 success.accept(property);
             }
         });
+    }
+
+    public static double[][] getPolygon(JsonObject data, boolean formattedResponse) {
+        List<double[]> coordinates = new ArrayList<>();
+        String formatted = null;
+        if (formattedResponse) {
+            String unformatted = data.get("boundaries").getAsString();
+            formatted = unformatted.replace("//", "").substring(0, unformatted.length());
+        } else if (data.has("boundaries")) {
+            formatted = data.get("boundaries").toString();
+        }
+        if (Objects.equals(formatted, "null") || formatted == null) {
+            return null;
+        }
+        JsonObject boundaries = ApiDataFetcher.GSON.fromJson(formatted, JsonObject.class);
+        String polygonType = boundaries.get("type").getAsString();
+        JsonArray coordinatesArray = boundaries.get("coordinates").getAsJsonArray();
+        if (polygonType.equals("MultiPolygon")) {
+            if (coordinatesArray.get(0).isJsonArray()) {
+                if (coordinatesArray.get(0).getAsJsonArray().get(0).isJsonArray()) {
+                    if (coordinatesArray.get(0).getAsJsonArray().get(0).getAsJsonArray().get(0).isJsonPrimitive()) {
+                        JsonArray loopArray = coordinatesArray.get(0).getAsJsonArray();
+                        for (JsonElement next : loopArray) {
+                            JsonArray jsonPos = next.getAsJsonArray();
+                            double[] pos = new double[]{jsonPos.get(0).getAsDouble(), jsonPos.get(1).getAsDouble()};
+                            coordinates.add(pos);
+                        }
+                    }
+                }
+            }
+        } else {
+            for (JsonElement nextCoordinate : coordinatesArray) {
+                for (JsonElement next : nextCoordinate.getAsJsonArray()) {
+                    JsonArray jsonPos = next.getAsJsonArray();
+                    double[] pos = new double[]{jsonPos.get(0).getAsDouble(), jsonPos.get(1).getAsDouble()};
+                    coordinates.add(pos);
+                }
+            }
+        }
+        return coordinates.toArray(new double[coordinates.size()][2]);
     }
 
     public static CompletableFuture<Property> fetchProperty(long propertyId) {
@@ -66,49 +110,29 @@ public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
             int cityId = data.get("city").getAsJsonObject().get("id").getAsInt();
             String fullAddress = data.get("full_address").getAsString();
             int area = data.get("area").getAsInt();
-            String status = data.get("status").getAsString();
+            JsonElement statusElement = data.get("status");
+            String status = "null";
+            if(statusElement != null && !statusElement.isJsonNull()) {
+                status = statusElement.getAsString();
+            }
             JsonElement buildingData = data.get("building");
-            String transactionId = data.get("transaction_id").getAsString();
+            JsonElement transactionIdElement = data.get("transaction_id");
+            String transactionId = "-1";
+            if (transactionIdElement != null && !transactionIdElement.isJsonNull()) {
+                transactionId = transactionIdElement.getAsString();
+            }
             JsonElement lastTrxId = data.get("last_transaction_id");
             String lastTransactionId = lastTrxId.isJsonNull() ? null : lastTrxId.getAsString();
             int price = data.get("price").getAsInt();
-            double yieldPerHour = data.get("yield_per_hour").getAsDouble();
+            JsonElement yieldPerHourElement = data.get("yield_per_hour");
+            double yieldPerHour = yieldPerHourElement == null ? 0.0 : yieldPerHourElement.isJsonNull() ? 0.0 : yieldPerHourElement.getAsDouble();
+            double centerLat = data.get("centerlat").getAsDouble();
+            double centerLng = data.get("centerlng").getAsDouble();
             int mintPrice = (int) Math.floor((yieldPerHour * 24 * 30) * 82.671);
-            List<double[]> coordinates = new ArrayList<>();
-            String unformatted = data.get("boundaries").getAsString();
-            String formatted = unformatted.replace("//", "").substring(0, unformatted.length());
-            JsonObject boundaries = ApiDataFetcher.GSON.fromJson(formatted, JsonObject.class);
-            String polygonType = boundaries.get("type").getAsString();
-            JsonArray coordinatesArray = boundaries.get("coordinates").getAsJsonArray();
-            if (polygonType.equals("MultiPolygon")) {
-                while (coordinatesArray.isJsonArray()) {
-                    if (coordinatesArray.get(0).isJsonArray()) {
-                        if (coordinatesArray.get(0).getAsJsonArray().get(0).isJsonArray()) {
-                            if (coordinatesArray.get(0).getAsJsonArray().get(0).getAsJsonArray().get(0).isJsonPrimitive()) {
-                                JsonArray loopArray = coordinatesArray.get(0).getAsJsonArray();
-                                for (JsonElement next : loopArray) {
-                                    JsonArray jsonPos = next.getAsJsonArray();
-                                    double[] pos = new double[]{jsonPos.get(0).getAsDouble(), jsonPos.get(1).getAsDouble()};
-                                    coordinates.add(pos);
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    coordinatesArray = coordinatesArray.getAsJsonArray();
-                }
-            } else {
-                for (JsonElement nextCoordinate : coordinatesArray) {
-                    for (JsonElement next : nextCoordinate.getAsJsonArray()) {
-                        JsonArray jsonPos = next.getAsJsonArray();
-                        double[] pos = new double[]{jsonPos.get(0).getAsDouble(), jsonPos.get(1).getAsDouble()};
-                        coordinates.add(pos);
-                    }
-                }
-            }
-
-            String owner = data.get("owner").getAsString();
-            String ownerUsername = data.get("owner_username").getAsString();
+            JsonElement ownerElement = data.get("owner");
+            String owner =  ownerElement == null || ownerElement.isJsonNull() ? null : ownerElement.getAsString();
+            JsonElement ownerUsernameElement = data.get("owner_username");
+            String ownerUsername = ownerUsernameElement.isJsonNull() ? null : ownerUsernameElement.getAsString();
             String buildStatus;
             double buildPercentage;
             double stakedSpark = 0.0;
@@ -116,7 +140,7 @@ public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
             double progressInSpark = 0.0;
             int maxStakedSpark = 0;
             Instant finishedAt = null;
-            if (buildingData.isJsonNull()) {
+            if (buildingData != null && buildingData.isJsonNull()) {
                 buildPercentage = 0.0;
                 buildStatus = "Not started";
             } else {
@@ -148,7 +172,7 @@ public final class PropertyDataFetcher extends ApiDataFetcher<Property> {
                     throw new IllegalStateException("Invalid build status.");
                 }
             }
-            property = new Property(propId, cityId, fullAddress, area, status, buildStatus, buildPercentage, price, transactionId, lastTransactionId,  mintPrice, coordinates.toArray(new double[coordinates.size()][2]), ownerUsername, owner, stakedSpark, totalSparksRequired, progressInSpark, maxStakedSpark, finishedAt);
+            property = new Property(propId, cityId, fullAddress, area, status, buildStatus, buildPercentage, price, transactionId, lastTransactionId, mintPrice, centerLat, centerLng, getPolygon(data, true), ownerUsername, owner, stakedSpark, totalSparksRequired, progressInSpark, maxStakedSpark, finishedAt);
         } catch (Exception e) {
             property = null;
             logger.error(new ParameterizedMessage("Error reading property data for [{}]", link), e);

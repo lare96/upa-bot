@@ -1,13 +1,12 @@
 package me.upa.sql;
 
 import com.google.common.base.Objects;
-import me.upa.discord.CreditTransaction;
+import me.upa.discord.listener.credit.CreditTransaction;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;

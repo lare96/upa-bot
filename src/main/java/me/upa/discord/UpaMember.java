@@ -3,8 +3,10 @@ package me.upa.discord;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.util.concurrent.AtomicDouble;
+import me.upa.game.Node;
 import net.dv8tion.jda.api.entities.Member;
 
+import java.io.Serializable;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
@@ -13,10 +15,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-public final class UpaMember {
+public final class UpaMember implements Serializable {
+    private static final long serialVersionUID = 3704515143032833401L;
     private final int key;
     private final long memberId;
     private final String inGameName;
+
 
     private final AtomicReference<String> discordName = new AtomicReference<>();
     private final String blockchainAccountId;
@@ -24,7 +28,10 @@ public final class UpaMember {
     private final AtomicInteger netWorth = new AtomicInteger();
     private final AtomicInteger credit = new AtomicInteger();
 
-    private final AtomicInteger ssh = new AtomicInteger();
+    private final AtomicInteger hollisSsh = new AtomicInteger();
+
+    private final AtomicInteger globalSsh = new AtomicInteger();
+
 
     private final AtomicInteger sends = new AtomicInteger();
     private final AtomicInteger sponsoredSends = new AtomicInteger();
@@ -34,11 +41,12 @@ public final class UpaMember {
     private final AtomicReference<Instant> claimedDailyAt = new AtomicReference<>();
 
     private final AtomicBoolean sync = new AtomicBoolean();
+    private final AtomicBoolean active = new AtomicBoolean();
 
     private final LocalDate joinDate;
 
 
-    public UpaMember(int key, long memberId, String inGameName, String discordName, String blockchainAccountId, int netWorth, int credit, int ssh, int sends, int sponsoredSends, int referrals, int minted, Instant claimedDailyAt, boolean sync, LocalDate joinDate) {
+    public UpaMember(int key, long memberId, String inGameName, String discordName, String blockchainAccountId, int netWorth, int credit, int hollisSsh, int globalSsh, int sends, int sponsoredSends, int referrals, int minted, Instant claimedDailyAt, boolean sync, boolean active, LocalDate joinDate) {
         this.key = key;
         this.memberId = memberId;
         this.inGameName = inGameName;
@@ -46,13 +54,15 @@ public final class UpaMember {
         this.blockchainAccountId = blockchainAccountId;
         this.netWorth.set(netWorth);
         this.credit.set(credit);
-        this.ssh.set(ssh);
+        this.hollisSsh.set(hollisSsh);
+        this.globalSsh.set(globalSsh);
         this.sends.set(sends);
         this.sponsoredSends.set(sponsoredSends);
         this.referrals.set(referrals);
         this.minted.set(minted);
         this.claimedDailyAt.set(claimedDailyAt);
         this.sync.set(sync);
+        this.active.set(active);
         this.joinDate = joinDate;
         pacHistoryKey = Paths.get(memberId + ".bin");
     }
@@ -106,8 +116,12 @@ public final class UpaMember {
         return credit;
     }
 
-    public AtomicInteger getSsh() {
-        return ssh;
+    public AtomicInteger getHollisSsh() {
+        return hollisSsh;
+    }
+
+    public AtomicInteger getGlobalSsh() {
+        return globalSsh;
     }
 
     public AtomicInteger getSends() {
@@ -134,12 +148,23 @@ public final class UpaMember {
         return sync;
     }
 
+    public AtomicBoolean getActive() {
+        return active;
+    }
+
     public int getTotalSends() {
         return sponsoredSends.get() + sends.get();
     }
 
-    public double getTotalSsh() {
-        return ssh.get() + sparkTrainSsh.get();
+    private double getTotalHollisSsh() {
+        return hollisSsh.get() + hollisSparkTrainSsh.get();
+    }
+    private double getTotalGlobalSsh() {
+        return globalSsh.get() + globalSparkTrainSsh.get();
+    }
+
+    public double getTotalSsh(boolean global) {
+        return global ? getTotalGlobalSsh() : getTotalHollisSsh();
     }
     public LocalDate getJoinDate() {
         return joinDate;
@@ -147,21 +172,54 @@ public final class UpaMember {
 
 
     // temp attributes
-    private final AtomicDouble sparkTrainSsh = new AtomicDouble();
+    private final AtomicDouble hollisSparkTrainSsh = new AtomicDouble();
+    private final AtomicDouble globalSparkTrainSsh = new AtomicDouble();
 
-    private final AtomicInteger sparkTrainPlace = new AtomicInteger();
+    private final AtomicInteger hollisSparkTrainPlace = new AtomicInteger();
+    private final AtomicInteger globalSparkTrainPlace = new AtomicInteger();
 
     private final AtomicInteger totalUp2 = new AtomicInteger();
 
     private final AtomicReference<Member> pendingTransaction = new AtomicReference<>();
 
     private volatile Path pacHistoryKey;
-    public AtomicDouble getSparkTrainSsh() {
-        return sparkTrainSsh;
+
+    private final AtomicInteger listingBrowseSlot = new AtomicInteger();
+    private volatile Node listingBrowseNode;
+
+    private final AtomicDouble hollisSparkTrainStaked = new AtomicDouble();
+    private final AtomicDouble globalSparkTrainStaked = new AtomicDouble();
+
+    private final AtomicDouble hollisSparkTrainShGiven = new AtomicDouble();
+    private final AtomicDouble globalSparkTrainShGiven = new AtomicDouble();
+
+
+    public AtomicDouble getHollisSparkTrainSsh() {
+        return hollisSparkTrainSsh;
     }
 
-    public AtomicInteger getSparkTrainPlace() {
-        return sparkTrainPlace;
+    public AtomicDouble getHollisSparkTrainShGiven() {
+        return hollisSparkTrainShGiven;
+    }
+
+    public AtomicInteger getHollisSparkTrainPlace() {
+        return hollisSparkTrainPlace;
+    }
+
+    public AtomicInteger getGlobalSparkTrainPlace() {
+        return globalSparkTrainPlace;
+    }
+
+    public AtomicDouble getGlobalSparkTrainSsh() {
+        return globalSparkTrainSsh;
+    }
+
+    public AtomicDouble getGlobalSparkTrainShGiven() {
+        return globalSparkTrainShGiven;
+    }
+
+    public AtomicDouble getGlobalSparkTrainStaked() {
+        return globalSparkTrainStaked;
     }
 
     public AtomicInteger getTotalUp2() {
@@ -174,5 +232,26 @@ public final class UpaMember {
 
     public Path getPacHistoryKey() {
         return pacHistoryKey;
+    }
+
+    public AtomicInteger getListingBrowseSlot() {
+        return listingBrowseSlot;
+    }
+
+    public void setListingBrowseNode(Node listingBrowseNode) {
+        this.listingBrowseNode = listingBrowseNode;
+    }
+
+    public Node getListingBrowseNode() {
+        return listingBrowseNode;
+    }
+
+    // TODO Make this into boolean global
+    public AtomicDouble getHollisSparkTrainStaked() {
+        return hollisSparkTrainStaked;
+    }
+
+    public double getTotalStaking() {
+        return hollisSparkTrainStaked.get() + globalSparkTrainStaked.get();
     }
 }

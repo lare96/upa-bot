@@ -1,210 +1,158 @@
 package me.upa.service;
 
-import com.google.common.base.Objects;
-import com.google.common.collect.ConcurrentHashMultiset;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import me.upa.UpaBotContext;
-import me.upa.discord.CreditTransaction;
-import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.UpaMember;
-import me.upa.discord.command.PacCommands;
+import me.upa.discord.event.UpaEvent;
+import me.upa.discord.event.UpaEventHandler;
+import me.upa.discord.event.impl.BonusPacEventHandler;
+import me.upa.discord.listener.command.PacCommands;
+import me.upa.discord.listener.credit.CreditTransaction;
+import me.upa.discord.listener.credit.CreditTransaction.CreditTransactionType;
 import me.upa.fetcher.YieldDataFetcher;
 import me.upa.game.PropertyYield;
 import me.upa.game.PropertyYieldVisitor;
-import me.upa.sql.SqlConnectionManager;
-import me.upa.sql.SqlTask;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
+import java.io.Serializable;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public final class PaidVisitsMicroService extends MicroService {
 
-    private static final class PaidVisitor {
-        private final UpaMember upaMember;
-        private final Instant lastClaimed;
+    public static final class PropertyVisitData implements Serializable {
+        private static final long serialVersionUID = -2578762170336130291L;
+        private final Map<Long, VisitData> properties = new ConcurrentHashMap<>();
 
-        private PaidVisitor(UpaMember upaMember, Instant lastClaimed) {
-            this.upaMember = upaMember;
+        public Map<Long, VisitData> getProperties() {
+            return properties;
+        }
+    }
+
+    public static final class VisitData implements Serializable {
+        private static final long serialVersionUID = -9191391430924788483L;
+        private final long propertyId;
+        private volatile int lastIndex;
+        private volatile Instant lastClaimed;
+
+        public VisitData(long propertyId, int lastIndex, Instant lastClaimed) {
+            this.propertyId = propertyId;
+            this.lastIndex = lastIndex;
             this.lastClaimed = lastClaimed;
         }
 
         @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            PaidVisitor that = (PaidVisitor) o;
-            return Objects.equal(upaMember, that.upaMember);
+        public String toString() {
+            return MoreObjects.toStringHelper(this).add("property_id", propertyId).add("last_index", lastIndex).toString();
         }
 
-        @Override
-        public int hashCode() {
-            return Objects.hashCode(upaMember);
+        public long getPropertyId() {
+            return propertyId;
         }
 
-        public UpaMember getUpaMember() {
-            return upaMember;
+        public int getLastIndex() {
+            return lastIndex;
+        }
+
+        public void setLastIndex(int lastIndex) {
+            this.lastIndex = lastIndex;
         }
 
         public Instant getLastClaimed() {
             return lastClaimed;
         }
-    }
 
-    private static final class UpdatePurchaseHistoryTask extends SqlTask<Void> {
-
-        private final Set<PaidVisitor> removals;
-        private final Multiset<PaidVisitor> paidUpx;
-
-        private UpdatePurchaseHistoryTask(Set<PaidVisitor> removals, Multiset<PaidVisitor> paidUpx) {
-            this.removals = removals;
-            this.paidUpx = paidUpx;
-        }
-
-        @Override
-        public Void execute(Connection connection) throws Exception {
-            try {
-                connection.setAutoCommit(false);
-                if (removals.size() > 0) {
-                    try (PreparedStatement ps = connection.prepareStatement("DELETE FROM paid_sends WHERE blockchain_account_id = ?;")) {
-                        for (PaidVisitor paidVisitor : removals) {
-                            ps.setString(1, paidVisitor.upaMember.getBlockchainAccountId());
-                            ps.addBatch();
-                        }
-                        if (ps.executeBatch().length != removals.size()) {
-                            connection.rollback();
-                            throw new Exception();
-                        }
-                    }
-                }
-                if (paidUpx.entrySet().size() > 0) {
-                    try (PreparedStatement ps = connection.prepareStatement("INSERT INTO paid_sends (blockchain_account_id, upx_given, last_claimed) VALUES (?, ?, ?) " +
-                            "ON DUPLICATE KEY UPDATE upx_given = upx_given + ?, last_claimed = ?;")) {
-                        for (var next : paidUpx.entrySet()) {
-                            String bcId = next.getElement().upaMember.getBlockchainAccountId();
-                            ps.setString(1, bcId);
-                            ps.setInt(2, next.getCount());
-                            ps.setString(3, next.getElement().lastClaimed.toString());
-                            ps.setInt(4, next.getCount());
-                            ps.setString(5, next.getElement().lastClaimed.toString());
-                            ps.addBatch();
-                        }
-                        if (ps.executeBatch().length != paidUpx.entrySet().size()) {
-                            connection.rollback();
-                            throw new RuntimeException("Could not update paid sends!");
-                        }
-                    }
-                }
-                connection.commit();
-            } finally {
-                connection.setAutoCommit(true);
-            }
-            return null;
+        public void setLastClaimed(Instant lastClaimed) {
+            this.lastClaimed = lastClaimed;
         }
     }
+
     private final UpaBotContext ctx;
 
-    private final Multiset<PaidVisitor> lastVisitors = ConcurrentHashMultiset.create();
+    private volatile boolean paused;
 
     public PaidVisitsMicroService(UpaBotContext ctx) {
-        super(Duration.ofMinutes(3));
+        super(Duration.ofMinutes(1));
         this.ctx = ctx;
     }
 
     @Override
-    public void startUp() throws Exception {
-        Map<String, UpaMember> eosMap = computeEosMap();
-        try (Connection connection = SqlConnectionManager.getInstance().take()) {
-            try (PreparedStatement ps = connection.prepareStatement("SELECT * FROM paid_sends;");
-                 ResultSet results = ps.executeQuery()) {
-                while (results.next()) {
-                    String eosId = results.getString(1);
-                    int upx = results.getInt(2);
-                    Instant lastClaimed = Instant.parse(results.getString(3));
-                    UpaMember member = eosMap.get(eosId);
-                    if (member != null) {
-                        lastVisitors.add(new PaidVisitor(member, lastClaimed), upx);
-                    }
-                }
-            }
-        }
-    }
-
-    @Override
     public void run() throws Exception {
-        Map<String, UpaMember> eosMap = computeEosMap();
-        Multiset<PaidVisitor> newVisitors = HashMultiset.create();
-        Multiset<PaidVisitor> paidUpx = HashMultiset.create();
-        Map<PaidVisitor, Instant> lastYieldClaims = new HashMap<>();
-        var fetcher = new YieldDataFetcher();
-        List<PropertyYield> yields = fetcher.waitUntilDone();
-        if(yields == null){
+        if (paused) {
             return;
         }
-        for (PropertyYield propertyYield : yields) {
-            if (!PacCommands.UPA_VISIT_PROPERTY_IDS.contains(propertyYield.getPropertyId())) {
-                continue;
-            }
-            for (PropertyYieldVisitor visitor : propertyYield.getVisitors()) {
-                UpaMember upaMember = eosMap.get(visitor.getEosId());
-                if (upaMember != null) {
-                    var paidVisitor = new PaidVisitor(upaMember, propertyYield.getLastClaimed());
-                    newVisitors.add(paidVisitor, visitor.getFee());
-                    lastYieldClaims.put(paidVisitor, propertyYield.getLastClaimed());
-                }
-            }
+        List<PropertyYield> newYieldData = new YieldDataFetcher().waitUntilDone();
+        if(newYieldData == null) {
+            return;
         }
-
-        Set<PaidVisitor> claimed = new HashSet<>();
-        if (lastVisitors.isEmpty()) {
-            paidUpx.addAll(newVisitors);
-        } else {
-            for (var next : lastVisitors.entrySet()) {
-                PaidVisitor paidVisitor = next.getElement();
-                int oldCount = next.getCount();
-                int newCount = newVisitors.count(paidVisitor);
-                if (newCount == 0) {
-                    claimed.add(paidVisitor);
+        Map<String, UpaMember> eosMap = computeEosMap();
+        Multiset<UpaMember> payouts = HashMultiset.create();
+        ctx.variables().yields().accessValue(oldYieldData -> {
+            for (PropertyYield newYield : newYieldData) {
+                long propertyId = newYield.getPropertyId();
+                if (!PacCommands.UPA_VISIT_PROPERTY_IDS.contains(propertyId)) {
                     continue;
                 }
-                Instant matchingInstant = lastYieldClaims.get(paidVisitor);
-                if (oldCount > newCount && matchingInstant.isAfter(paidVisitor.lastClaimed)) {
-                    paidUpx.add(next.getElement(), newCount);
-                } else if (newCount > oldCount) {
-                    paidUpx.add(next.getElement(), newCount - oldCount);
-                }
-            }
-        }
-        if (claimed.size() > 0 || paidUpx.size() > 0) {
-            // TODO do on same thread...
-            // There are new payments, replace/update table with the new payments. Delete some claimed payments.
-            SqlConnectionManager.getInstance().execute(new UpdatePurchaseHistoryTask(claimed, paidUpx), success -> {
-                claimed.forEach(lastVisitors::remove);
-                for (var next : paidUpx.entrySet()) {
-                    lastVisitors.add(next.getElement(), next.getCount());
-                }
-                if (paidUpx.size() > 0) {
-                    List<CreditTransaction> transactions = new ArrayList<>();
-                    for (var next : paidUpx.entrySet()) {
-                        transactions.add(new CreditTransaction(next.getElement().upaMember, next.getCount(), CreditTransactionType.PURCHASE, "visiting a designated UPA property"));
+
+                VisitData oldYield = oldYieldData.getProperties().get(propertyId);
+                if (oldYield == null) { // Yield entry is brand new, check for payouts.
+                    int index = -1;
+                    for (PropertyYieldVisitor visitor : newYield.getVisitors()) {
+                        index++;
+                        UpaMember upaMember = eosMap.get(visitor.getEosId());
+                        if (upaMember != null) {
+                            payouts.add(upaMember, visitor.getFee());
+                        }
                     }
-                    ctx.discord().sendCredit(transactions);
+                    VisitData newYieldEntry = new VisitData(propertyId, index, newYield.getLastClaimed());
+                    oldYieldData.getProperties().put(propertyId, newYieldEntry);
+                    continue;
                 }
-            });
+                if (!newYield.getLastClaimed().equals(oldYield.lastClaimed)) {
+                    oldYield.lastIndex = -1;
+                    oldYield.lastClaimed = newYield.getLastClaimed();
+                }
+                int index = 0;
+                for (PropertyYieldVisitor visitor : newYield.getVisitors()) {
+                    if (index++ <= oldYield.lastIndex) {
+                        continue;
+                    }
+                    UpaMember upaMember = eosMap.get(visitor.getEosId());
+                    if (upaMember != null) {
+                        payouts.add(upaMember, visitor.getFee());
+                    }
+                }
+                oldYield.lastIndex = index - 1;
+            }
+            return true;
+        });
+
+        List<CreditTransaction> transactions = new ArrayList<>();
+        for (var nextPayout : payouts.entrySet()) {
+            int amount = nextPayout.getCount();
+            if (UpaEvent.isActive(ctx, BonusPacEventHandler.class)) {
+                amount *= 1.25;
+            }
+            transactions.add(new CreditTransaction(nextPayout.getElement(), amount, CreditTransactionType.PURCHASE, "visiting a designated UPA property"));
         }
+        ctx.discord().sendCredit(transactions);
     }
 
     private Map<String, UpaMember> computeEosMap() {
-        return ctx.databaseCaching().getMembers().values().stream().collect(Collectors.toMap(UpaMember::getBlockchainAccountId, v -> v));
+        return ctx.databaseCaching().getMembers().values().stream().filter(next -> next.getActive().get()).collect(Collectors.toMap(UpaMember::getBlockchainAccountId, v -> v));
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public void setPaused(boolean paused) {
+        this.paused = paused;
     }
 }

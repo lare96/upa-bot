@@ -1,38 +1,32 @@
 package me.upa.service;
 
-import com.fasterxml.jackson.databind.ser.std.StdArraySerializers.IntArraySerializer;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.collect.HashMultimap;
-import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimaps;
-import com.google.common.collect.Multiset;
 import com.google.common.collect.SetMultimap;
-import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.AbstractIdleService;
-import me.upa.UpaBot;
 import me.upa.UpaBotContext;
-import me.upa.discord.DiscordService;
 import me.upa.discord.PacHistoryStatement;
-import me.upa.discord.Scholar;
-import me.upa.discord.SendStormEvent;
 import me.upa.discord.UpaMember;
 import me.upa.discord.UpaPoolProperty;
 import me.upa.discord.UpaProperty;
+import me.upa.fetcher.CityDataFetcher;
+import me.upa.fetcher.CollectionDataFetcher;
+import me.upa.fetcher.NeighborhoodDataFetcher;
 import me.upa.game.CachedProperty;
+import me.upa.game.Node;
+import me.upa.game.Profile;
 import me.upa.sql.SqlConnectionManager;
-import net.dv8tion.jda.api.entities.Invite;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.utils.concurrent.Task;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import javax.xml.crypto.Data;
-import java.io.IOException;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -42,6 +36,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,6 +49,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author lare96
  */
 public final class DatabaseCachingService extends AbstractIdleService {
+
+    private static final Path PROFILE_PATH = Paths.get("data", "profiles.bin");
 
     /**
      * The logger.
@@ -83,11 +80,6 @@ public final class DatabaseCachingService extends AbstractIdleService {
     private final SetMultimap<Integer, UpaProperty> memberProperties = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
     /**
-     * The cached scholars (member_id -> Scholar).
-     */
-    private final Map<Long, Scholar> scholars = new ConcurrentHashMap<>();
-
-    /**
      * The cached lookup properties.
      */
     private final Map<Long, CachedProperty> propertyLookup = new ConcurrentHashMap<>();
@@ -107,19 +99,35 @@ public final class DatabaseCachingService extends AbstractIdleService {
      */
     private final AtomicLong totalPac = new AtomicLong();
 
+    private final Map<Long, Profile> profiles = new ConcurrentHashMap<>();
+
     private final ListMultimap<Long, PacHistoryStatement> pacHistory = Multimaps.synchronizedListMultimap(ArrayListMultimap.create());
 
     public DatabaseCachingService(UpaBotContext ctx) {
         this.ctx = ctx;
     }
+
     @Override
     protected void startUp() throws Exception {
+        // Load neighborhoods anad cities.
+        CityDataFetcher cityFetcher = new CityDataFetcher();
+        NeighborhoodDataFetcher neighborhoodFetcher = new NeighborhoodDataFetcher();
+        CollectionDataFetcher collectionFetcher = new CollectionDataFetcher();
+        cityFetcher.waitUntilDone();
+        neighborhoodFetcher.waitUntilDone();
+        collectionFetcher.waitUntilDone();
+
+        Map<Long, Profile> loadedProfiles = ctx.load(PROFILE_PATH);
+        if (loadedProfiles != null) {
+            profiles.putAll(loadedProfiles);
+        }
+
         try (Connection connection = SqlConnectionManager.getInstance().take()) {
             Map<Integer, UpaMember> memberKeys = new HashMap<>();
 
             // All linked Discord members.
             Set<Long> memberIds = new HashSet<>();
-            try (PreparedStatement selectMembers = connection.prepareStatement("SELECT `key`, member_id, in_game_name, blockchain_account_id, networth, credit, ssh, sends, sponsored_sends, referrals, minted, claimed_daily_at, sync, join_date FROM members;");
+            try (PreparedStatement selectMembers = connection.prepareStatement("SELECT `key`, member_id, in_game_name, blockchain_account_id, networth, credit, hollis_ssh, global_ssh, sends, sponsored_sends, referrals, minted, claimed_daily_at, sync, active, join_date FROM members;");
                  ResultSet memberResults = selectMembers.executeQuery()) {
                 while (memberResults.next()) {
                     int memberKey = memberResults.getInt(1);
@@ -129,62 +137,82 @@ public final class DatabaseCachingService extends AbstractIdleService {
                     int netWorth = memberResults.getInt(5);
                     int credit = memberResults.getInt(6);
                     int ssh = memberResults.getInt(7);
-                    int sends = memberResults.getInt(8);
-                    int sponsoredSends = memberResults.getInt(9);
-                    int referrals = memberResults.getInt(10);
-                    int minted = memberResults.getInt(11);
-                    Instant claimedDailyAt = Instant.parse(memberResults.getString(12));
-                    boolean sync = memberResults.getBoolean(13);
-                    LocalDate joinDate = memberResults.getDate(14).toLocalDate();
-                    var upaMember = new UpaMember(memberKey, memberId, inGameName, "<not_yet_loaded>", blockchainAccountId, netWorth, credit, ssh, sends, sponsoredSends, referrals, minted, claimedDailyAt, sync, joinDate);
-                    memberIds.add(Long.valueOf(memberId));
+                    int globalSsh = memberResults.getInt(8);
+                    int sends = memberResults.getInt(9);
+                    int sponsoredSends = memberResults.getInt(10);
+                    int referrals = memberResults.getInt(11);
+                    int minted = memberResults.getInt(12);
+                    Instant claimedDailyAt = Instant.parse(memberResults.getString(13));
+                    boolean sync = memberResults.getBoolean(14);
+                    boolean active = memberResults.getBoolean(15);
+                    LocalDate joinDate = memberResults.getDate(16).toLocalDate();
+                    var upaMember = new UpaMember(memberKey, memberId, inGameName, "<not_yet_loaded>", blockchainAccountId, netWorth, credit, ssh, globalSsh, sends, sponsoredSends, referrals, minted, claimedDailyAt, sync, active, joinDate);
+                    memberIds.add(memberId);
                     members.put(memberId, upaMember);
                     memberNames.put(memberId, inGameName);
                     memberKeys.put(memberKey, upaMember);
                 }
             }
+
             // Cache discord names.
-            Task<List<Member>> retrieveMembersTask = ctx.discord().guild().retrieveMembersByIds(memberIds);
-            List<Member> discordUpaMembers = retrieveMembersTask.get(); // TODO async, don't block db
-            for (Member nextMember : discordUpaMembers) {
-                UpaMember upaMember = members.get(nextMember.getIdLong());
-                upaMember.getDiscordName().set(nextMember.getEffectiveName());
+            while(!memberIds.isEmpty()) {
+                Set<Long> shortMemberIds = new HashSet<>();
+                for (Iterator<Long> memberIdsIterator = memberIds.iterator();memberIdsIterator.hasNext();) {
+                    shortMemberIds.add(memberIdsIterator.next());
+                    memberIdsIterator.remove();
+                    if(shortMemberIds.size() == 100) {
+                        break;
+                    }
+                }
+                Task<List<Member>> retrieveMembersTask = ctx.discord().guild().retrieveMembersByIds(shortMemberIds);
+                List<Member> discordUpaMembers = retrieveMembersTask.get();
+                for (Member nextMember : discordUpaMembers) {
+                    UpaMember upaMember = members.get(nextMember.getIdLong());
+                    upaMember.getDiscordName().set(nextMember.getEffectiveName());
+                }
             }
 
             // Unlink any members that have left.
             Set<UpaMember> unlink = new HashSet<>();
             for (UpaMember upaMember : members.values()) {
-                if (upaMember.getDiscordName().get().equals("<not_yet_loaded>")) {
+                if (upaMember.getDiscordName().get().equals("<not_yet_loaded>") && upaMember.getActive().get()) {
                     unlink.add(upaMember);
                 } else {
                     totalPac.addAndGet(upaMember.getCredit().get());
                 }
             }
-            if (unlink.size() > 0) {
-                try (PreparedStatement unlinkMembers = connection.prepareStatement("DELETE members, node_properties FROM members INNER JOIN node_properties ON members.`key` = node_properties.member_key WHERE members.`key` = ?;")) {
+            int unlinkSize = unlink.size();
+            if (unlinkSize > 0) {
+                try (PreparedStatement setInactive = connection.prepareStatement("UPDATE members SET active = 0 WHERE `key` = ?;");
+                     PreparedStatement setPropertiesInactive = connection.prepareStatement("UPDATE node_properties SET active = 0 WHERE `member_key` = ?;")) {
                     for (UpaMember upaMember : unlink) {
-                        unlinkMembers.setInt(1, upaMember.getKey());
-                        unlinkMembers.addBatch();
-                        members.remove(upaMember.getMemberId());
-                        memberKeys.remove(upaMember.getKey());
+                        setInactive.setInt(1, upaMember.getKey());
+                        setInactive.addBatch();
+                        setPropertiesInactive.setInt(1, upaMember.getKey());
+                        setPropertiesInactive.addBatch();
+                        upaMember.getActive().set(false);
+                        ctx.databaseCaching().getMemberProperties().get(upaMember.getKey()).forEach(property -> property.getActive().set(false));
                     }
-                    logger.info("Unlinked {} members.", unlinkMembers.executeBatch().length);
+                    setInactive.executeBatch();
+                    setPropertiesInactive.executeBatch();
+                    logger.info("Unlinked {} members.", unlinkSize);
                 }
             }
             logger.info("Loaded {} members.", members.size());
 
             // All linked node properties.
-            try (PreparedStatement selectProperties = connection.prepareStatement("SELECT member_key, address, property_id, build_status, node, size, in_genesis FROM node_properties;");
+            try (PreparedStatement selectProperties = connection.prepareStatement("SELECT member_key, address, property_id, build_status, node, size, in_genesis, active FROM node_properties;");
                  ResultSet propertyResults = selectProperties.executeQuery()) {
                 while (propertyResults.next()) {
                     int memberKey = propertyResults.getInt(1);
                     String address = propertyResults.getString(2);
                     long propertyId = propertyResults.getLong(3);
                     String buildStatus = propertyResults.getString(4);
-                    String node = propertyResults.getString(5);
+                    Node node = Node.valueOf(propertyResults.getString(5));
                     int size = propertyResults.getInt(6);
                     boolean inGenesis = propertyResults.getBoolean(7);
-                    var upaProperty = new UpaProperty(memberKey, address, propertyId, buildStatus, node, size, inGenesis);
+                    boolean active = propertyResults.getBoolean(8);
+                    var upaProperty = new UpaProperty(memberKey, address, propertyId, buildStatus, node, size, inGenesis, active);
                     properties.put(propertyId, upaProperty);
                     memberProperties.put(memberKey, upaProperty);
                     constructionStatus.put(address, buildStatus);
@@ -197,27 +225,8 @@ public final class DatabaseCachingService extends AbstractIdleService {
             }
             logger.info("Loaded {} properties.", properties.size());
 
-            // All scholars.
-            try (PreparedStatement selectProperties = connection.prepareStatement("SELECT username, address, property_id, discord_id, net_worth, sponsored, last_fetch FROM scholars;");
-                 ResultSet propertyResults = selectProperties.executeQuery()) {
-                while (propertyResults.next()) {
-                    String username = propertyResults.getString(1);
-                    String address = propertyResults.getString(2);
-                    long propertyId = propertyResults.getLong(3);
-                    long discordId = propertyResults.getLong(4);
-                    int netWorth = propertyResults.getInt(5);
-                    boolean sponsored = propertyResults.getBoolean(6);
-                    Instant lastFetchInstant = Instant.parse(propertyResults.getString(7));
-
-                    Scholar scholar = new Scholar(username, address, propertyId, netWorth, discordId, sponsored, lastFetchInstant);
-                    scholars.put(discordId, scholar);
-                    scholar.getSponsored().set(sponsored);
-                }
-            }
-            logger.info("Loaded {} scholars.", scholars.size());
-
             // All property lookups.
-            try (PreparedStatement selectProperties = connection.prepareStatement("SELECT property_id, address, area, neighborhood_id, city_id FROM property_lookup;");
+            try (PreparedStatement selectProperties = connection.prepareStatement("SELECT property_id, address, area, neighborhood_id, city_id, mint_price FROM property_lookup;");
                  ResultSet propertyLookupResults = selectProperties.executeQuery()) {
                 while (propertyLookupResults.next()) {
                     long propertyId = propertyLookupResults.getLong(1);
@@ -225,7 +234,8 @@ public final class DatabaseCachingService extends AbstractIdleService {
                     int area = propertyLookupResults.getInt(3);
                     int neighborhoodId = propertyLookupResults.getInt(4);
                     int cityId = propertyLookupResults.getInt(5);
-                    propertyLookup.put(propertyId, new CachedProperty(propertyId, address, area, neighborhoodId, cityId));
+                    long mintPrice = propertyLookupResults.getLong(6);
+                    propertyLookup.put(propertyId, new CachedProperty(propertyId, address, area, neighborhoodId, cityId, mintPrice));
                 }
             }
             logger.info("Loaded {} property lookups.", propertyLookup.size());
@@ -241,7 +251,8 @@ public final class DatabaseCachingService extends AbstractIdleService {
                     long donorMemberId = poolPropertyResults.getLong(6);
                     boolean verified = poolPropertyResults.getBoolean(7);
                     int cost = poolPropertyResults.getInt(8);
-                    UpaPoolProperty poolProperty = new UpaPoolProperty(propertyId, address, cityName, mintPrice, cost, up2, donorMemberId);
+                    LocalDate listedOn = poolPropertyResults.getDate(9).toLocalDate();
+                    UpaPoolProperty poolProperty = new UpaPoolProperty(propertyId, address, cityName, mintPrice, cost, up2, donorMemberId, listedOn);
                     poolProperty.getVerified().set(verified);
                     poolProperties.put(propertyId, poolProperty);
                 }
@@ -255,7 +266,6 @@ public final class DatabaseCachingService extends AbstractIdleService {
         members.clear();
         memberNames.clear();
         properties.clear();
-        scholars.clear();
         propertyLookup.clear();
         constructionStatus.clear();
     }
@@ -276,10 +286,6 @@ public final class DatabaseCachingService extends AbstractIdleService {
         return memberProperties;
     }
 
-    public Map<Long, Scholar> getScholars() {
-        return scholars;
-    }
-
     public Map<Long, CachedProperty> getPropertyLookup() {
         return propertyLookup;
     }
@@ -294,5 +300,9 @@ public final class DatabaseCachingService extends AbstractIdleService {
 
     public AtomicLong getTotalPac() {
         return totalPac;
+    }
+
+    public Map<Long, Profile> getProfiles() {
+        return profiles;
     }
 }

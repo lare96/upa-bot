@@ -2,10 +2,10 @@ package me.upa.discord;
 
 import com.google.common.base.Objects;
 import com.google.common.util.concurrent.AtomicDouble;
+import org.checkerframework.checker.units.qual.A;
 
 import java.io.Serializable;
 import java.time.Instant;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -27,6 +27,9 @@ public final class UpaBuildSlot implements Serializable {
 
     private final AtomicDouble sparkStaked = new AtomicDouble();
     private final AtomicDouble completionPercent = new AtomicDouble();
+
+    private  AtomicReference<String> cityName = new AtomicReference<>(".");
+    private AtomicReference<String> neighborhoodName = new AtomicReference<>(".");
 
 
     public UpaBuildSlot(long memberId, long propertyId, String structureName, String address, int maxSparkStaked, Instant finishedAt, double sparkStaked, double completionPercent) {
@@ -87,5 +90,17 @@ public final class UpaBuildSlot implements Serializable {
 
     public AtomicDouble getCompletionPercent() {
         return completionPercent;
+    }
+
+    public AtomicReference<String> getCityName() {
+        if(cityName == null)
+            cityName = new AtomicReference<>(".");
+        return cityName;
+    }
+
+    public AtomicReference<String> getNeighborhoodName() {
+        if(neighborhoodName== null)
+            neighborhoodName = new AtomicReference<>(".");
+        return neighborhoodName;
     }
 }

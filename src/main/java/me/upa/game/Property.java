@@ -19,6 +19,9 @@ public final class Property {
     private final String lastTransactionId;
 
     private final int mintPrice;
+
+    private final double centerLat;
+    private final double centerLng;
     private double[][] coordinates;
     private final String ownerUsername;
     private final String owner;
@@ -29,8 +32,9 @@ public final class Property {
     private final int maxStakedSpark;
     private final Instant finishedAt;
 
+
     public Property(long propId, int cityId, String fullAddress, int area, String status, String buildStatus, double buildPercentage,
-                    int price, String transactionId, String lastTransactionId, int mintPrice, double[][] coordinates,
+                    int price, String transactionId, String lastTransactionId, int mintPrice, double centerLat, double centerLng, double[][] coordinates,
                     String ownerUsername, String owner, double stakedSpark, int totalSparksRequired, double progressInSpark,
                     int maxStakedSpark, Instant finishedAt) {
         this.propId = propId;
@@ -44,6 +48,8 @@ public final class Property {
         this.transactionId = transactionId;
         this.lastTransactionId = lastTransactionId;
         this.mintPrice = mintPrice;
+        this.centerLat = centerLat;
+        this.centerLng =centerLng;
         this.coordinates = coordinates;
         this.ownerUsername = ownerUsername;
         this.owner = owner;
@@ -93,6 +99,14 @@ public final class Property {
 
     public int getMintPrice() {
         return mintPrice;
+    }
+
+    public double getCenterLat() {
+        return centerLat;
+    }
+
+    public double getCenterLng() {
+        return centerLng;
     }
 
     public double[][] getCoordinates() {

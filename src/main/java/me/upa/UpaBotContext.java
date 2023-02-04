@@ -2,20 +2,20 @@ package me.upa;
 
 import com.google.common.util.concurrent.Service;
 import me.upa.discord.DiscordService;
-import me.upa.service.BlockchainSynchronizationService;
+import me.upa.discord.event.UpaEventMicroService;
 import me.upa.service.DailyResetMicroService;
 import me.upa.service.DatabaseCachingService;
-import me.upa.service.EventProcessorMicroService;
+import me.upa.service.ListingRemovalMicroService;
 import me.upa.service.MemberVerificationMicroService;
 import me.upa.service.MicroService;
 import me.upa.service.MicroServiceProcessor;
 import me.upa.service.PacLotteryMicroService;
 import me.upa.service.PaidVisitsMicroService;
+import me.upa.service.PropertyCachingMicroService;
 import me.upa.service.PropertySynchronizationService;
 import me.upa.service.SalesProcessorService;
-import me.upa.service.ScholarVerificationService;
 import me.upa.service.SparkTrainMicroService;
-import me.upa.service.WeeklyReportMicroService;
+import me.upa.service.TriviaQuestionFetcherService;
 import me.upa.variable.SystemVariableRepository;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -67,16 +67,6 @@ public final class UpaBotContext {
     private final DatabaseCachingService databaseCachingService = new DatabaseCachingService(this);
 
     /**
-     * The scholar verification service.
-     */
-    private final ScholarVerificationService scholarVerificationService = new ScholarVerificationService(this);
-
-    /**
-     * The event processor.
-     */
-    private final EventProcessorMicroService eventProcessorMs = new EventProcessorMicroService(this);
-
-    /**
      * The daily reset microservice.
      */
     private final DailyResetMicroService dailyResetMs = new DailyResetMicroService(this);
@@ -97,14 +87,12 @@ public final class UpaBotContext {
     private final PacLotteryMicroService pacLotteryMs = new PacLotteryMicroService(this);
 
     /**
-     * The blockchain synchronizer.
-     */
-    private final BlockchainSynchronizationService blockchainSynchronizationService = new BlockchainSynchronizationService(this);
-
-    /**
      * The microservice processor.
      */
     private final MicroServiceProcessor microServices = new MicroServiceProcessor();
+
+    private final PropertyCachingMicroService propertyCachingMs = new PropertyCachingMicroService(this);
+    private final ListingRemovalMicroService listingRemovalMs = new ListingRemovalMicroService(this);
 
     /**
      * Initializes persistent system variables.
@@ -122,21 +110,23 @@ public final class UpaBotContext {
         microServices.addService(paidVisitsMs);
         microServices.addService(sparkTrainMs);
         microServices.addService(pacLotteryMs);
-        microServices.addService(eventProcessorMs);
-        microServices.addService(new WeeklyReportMicroService(this));
+        //microServices.addService(propertyCachingMs);
+        microServices.addService(listingRemovalMs);
+        microServices.addService(new UpaEventMicroService(this));
     }
 
+
     /**
-     * Initializes all heavy duty {@link Service}s that are backed by their own threads.
+     * Starts all heavy duty {@link Service}s that are backed by their own threads.
      */
-    public void loadServices() {
+    public void startServices() {
         discordService.startAsync().awaitRunning();
         databaseCachingService.startAsync().awaitRunning();
         propertySynchronizationService.startAsync().awaitRunning();
-        scholarVerificationService.startAsync().awaitRunning();
         microServices.startAsync().awaitRunning();
-        new SalesProcessorService(this).startAsync().awaitRunning();
-     //   blockchainSynchronizationService.startAsync().awaitRunning();
+        propertyCachingMs.startAsync().awaitRunning();
+         //new TriviaQuestionFetcherService().startAsync().awaitRunning();
+        // blockchainSynchronizationService.startAsync().awaitRunning();
     }
 
     /**
@@ -189,10 +179,6 @@ public final class UpaBotContext {
         return sparkTrainMs;
     }
 
-    public EventProcessorMicroService eventProcessor() {
-        return eventProcessorMs;
-    }
-
     private final SalesProcessorService salesProcessorService = new SalesProcessorService(this);
 
     public SalesProcessorService salesProcessor() {
@@ -203,6 +189,10 @@ public final class UpaBotContext {
         return pacLotteryMs;
     }
 
+    public PaidVisitsMicroService paidVisitsMs() {
+        return paidVisitsMs;
+    }
+
     public MemberVerificationMicroService memberVerification() {
         return memberVerificationMs;
     }
@@ -211,7 +201,10 @@ public final class UpaBotContext {
         return propertySynchronizationService;
     }
 
-    public BlockchainSynchronizationService blockchainSync() {return blockchainSynchronizationService;}
+    public ListingRemovalMicroService listingRemoval() {
+        return listingRemovalMs;
+    }
+
     UpaBotContext() {
     }
 }

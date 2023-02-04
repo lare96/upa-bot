@@ -12,6 +12,7 @@ import org.apache.logging.log4j.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 public final class YieldDataFetcher extends ApiDataFetcher<List<PropertyYield>> {
     private static final Logger logger = LogManager.getLogger();
@@ -35,7 +36,7 @@ public final class YieldDataFetcher extends ApiDataFetcher<List<PropertyYield>> 
             for (JsonElement propertyElement : object) {
                 JsonObject propertyObject = propertyElement.getAsJsonObject();
                 Instant lastYieldTime = Instant.parse(propertyObject.get("last_yield_time").getAsString());
-                String propertyId = propertyObject.get("prop_id").getAsString();
+                long propertyId = propertyObject.get("prop_id").getAsLong();
                 List<PropertyYieldVisitor> visitors = new ArrayList<>();
                 for (JsonElement data : propertyObject.getAsJsonArray("teleport_fees")) {
                     JsonObject visitorData = data.getAsJsonObject();

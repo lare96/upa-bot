@@ -1,6 +1,6 @@
 package me.upa.discord;
 
-import me.upa.discord.CreditTransaction.CreditTransactionType;
+import me.upa.discord.listener.credit.CreditTransaction.CreditTransactionType;
 
 import java.time.Instant;
 

@@ -2,13 +2,61 @@ package me.upa.discord;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
-import org.checkerframework.checker.units.qual.A;
+import me.upa.UpaBotContext;
+import me.upa.game.Property;
 
-import java.io.Serializable;
+import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 public final class UpaBuildRequest {
+
+    public static final class UpaBuildRequestComparator implements Comparator<UpaBuildRequest> {
+
+        private final UpaBotContext ctx;
+        private final boolean global;
+
+        public UpaBuildRequestComparator(UpaBotContext ctx, boolean global) {
+            this.ctx = ctx;
+            this.global = global;
+        }
+
+        @Override
+        public int compare(UpaBuildRequest o1, UpaBuildRequest o2) {
+            UpaMember o1Mem = ctx.databaseCaching().getMembers().get(o1.getMemberId());
+            UpaMember o2Mem = ctx.databaseCaching().getMembers().get(o2.getMemberId());
+            double o1Ssh = o1Mem.getTotalSsh(global);
+            double o2Ssh = o2Mem.getTotalSsh(global);
+            if(o1.hasBadResponse() || !o1Mem.getActive().get()) {
+                o1Ssh = Double.MIN_VALUE;
+            }
+            if(o2.hasBadResponse() || !o2Mem.getActive().get()) {
+                o2Ssh = Double.MIN_VALUE;
+            }
+            return Double.compare(o2Ssh, o1Ssh);
+        }
+    }
+
+    public enum BuildRequestResponse {
+        HAS_ACTIVE_BUILD("Already have an active build."),
+        TOO_MANY_BUILDS("Too many recent builds (More than 50% of last 10 builds)."),
+        HAS_STRUCTURE("Already has structure."),
+        ERROR("Backend error."),
+        NOT_ENOUGH_SSH("Not enough SSH."),
+
+        NOT_STARTED("Build has not been started."),
+
+        NORMAL("Next to be added to the queue.");
+
+        private final String formattedName;
+
+        BuildRequestResponse(String formattedName) {
+            this.formattedName = formattedName;
+        }
+
+        public String getFormattedName() {
+            return formattedName;
+        }
+    }
 
     private final long memberId;
     private final long propertyId;
@@ -16,12 +64,15 @@ public final class UpaBuildRequest {
 
     private final AtomicBoolean notified = new AtomicBoolean();
 
-    private final transient AtomicReference<String> address = new AtomicReference<>();
+    private final String address;
 
-    public UpaBuildRequest(long memberId, long propertyId, String structureName) {
+    private volatile BuildRequestResponse response = BuildRequestResponse.NORMAL;
+private volatile Property loadedProperty;
+    public UpaBuildRequest(long memberId, long propertyId, String structureName, String address) {
         this.memberId = memberId;
         this.propertyId = propertyId;
         this.structureName = structureName;
+        this.address = address;
     }
 
     @Override
@@ -41,7 +92,17 @@ public final class UpaBuildRequest {
     public int hashCode() {
         return Objects.hashCode(memberId);
     }
-    
+
+    public boolean hasBadResponse() {
+        switch (response) {
+            case NORMAL:
+            case NOT_ENOUGH_SSH:
+            case ERROR:
+                return false;
+        }
+        return true;
+    }
+
     public long getMemberId() {
         return memberId;
     }
@@ -58,11 +119,25 @@ public final class UpaBuildRequest {
         return notified;
     }
 
-    public void setAddress(String newAddress) {
-        address.compareAndSet(null, newAddress);
+    public String getAddress() {
+        if (address == null)
+            return propertyId + "";
+        return address;
     }
 
-    public String getAddress() {
-        return address.get();
+    public BuildRequestResponse getResponse() {
+        return response;
+    }
+
+    public void setResponse(BuildRequestResponse response) {
+        this.response = response;
+    }
+
+    public Property getLoadedProperty() {
+        return loadedProperty;
+    }
+
+    public void setLoadedProperty(Property loadedProperty) {
+        this.loadedProperty = loadedProperty;
     }
 }

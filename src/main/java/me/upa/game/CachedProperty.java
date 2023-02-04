@@ -10,12 +10,14 @@ public final class CachedProperty {
     private final int neighborhoodId;
     private final int cityId;
 
-    public CachedProperty(long propertyId, String address, int area, int neighborhoodId, int cityId) {
+    private final long mintPrice;
+    public CachedProperty(long propertyId, String address, int area, int neighborhoodId, int cityId, long mintPrice) {
         this.propertyId = propertyId;
         this.address = address;
         this.area = area;
         this.neighborhoodId = neighborhoodId;
         this.cityId = cityId;
+        this.mintPrice = mintPrice;
     }
 
     @Override
@@ -49,5 +51,9 @@ public final class CachedProperty {
 
     public int getCityId() {
         return cityId;
+    }
+
+    public long getMintPrice() {
+        return mintPrice;
     }
 }

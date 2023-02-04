@@ -3,14 +3,11 @@ package me.upa.service;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.AbstractScheduledService;
 import me.upa.UpaBotContext;
-import me.upa.fetcher.CsvDataFetcher;
-import me.upa.fetcher.CsvSalesDataFetcher;
 import me.upa.fetcher.DataFetcherManager;
-import me.upa.fetcher.SalesBlockchainDataFetcher;
 import me.upa.game.BlockchainSale;
 import me.upa.game.City;
-import me.upa.selector.NeighborhoodPropertySelector;
-import me.upa.selector.PropertySelector;
+import me.upa.game.selector.NeighborhoodPropertySelector;
+import me.upa.game.selector.PropertySelector;
 import net.dv8tion.jda.api.EmbedBuilder;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -19,10 +16,8 @@ import java.awt.*;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static java.util.Objects.requireNonNull;
@@ -73,7 +68,7 @@ public final class SalesProcessorService extends AbstractScheduledService {
                 return;
             }
             selector.select(city, DataFetcherManager.getSalesMap().get(cityId));
-            DataFetcherManager.refreshSalesMap(cityId);
+            DataFetcherManager.refreshSales(cityId);
             var list = DataFetcherManager.getSalesMap().get(cityId);
             //   if (list != null)
             //Logger.getGlobal().info("[" + city.getName() + "] Loaded " + list.size() + " sales in " + DiscordService.COMMA_FORMAT.format(stopwatch.elapsed().toMillis()) + " ms");
@@ -96,7 +91,6 @@ public final class SalesProcessorService extends AbstractScheduledService {
 
     @Override
     protected void startUp() throws Exception {
-        DataFetcherManager.getLocationFetcher().fetch();
     }
 
     private final Map<Long, Integer> recordedSales = new HashMap<>();

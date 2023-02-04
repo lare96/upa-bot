@@ -12,8 +12,11 @@ import me.upa.game.CityCollection;
 import me.upa.game.Neighborhood;
 import me.upa.game.Sale;
 
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -27,10 +30,7 @@ public final class DataFetcherManager {
 
     private static final ListeningExecutorService fetchPool = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()));
 
-    /**
-     * The city and neighborhood data fetcher.
-     */
-    private static final LocationDataFetcher LOCATION_FETCHER = new LocationDataFetcher();
+
 
     /**
      * The sales data fetcher.
@@ -66,10 +66,17 @@ public final class DataFetcherManager {
     /**
      * Refreshes the immutable copy of the sales map. All data passed to {@link #addSale(int, Sale)} is erased.
      */
-    public static void refreshSalesMap(int cityId) {
+    public static void refreshSales(int cityId) {
         salesMap.put(cityId, mutableSalesMap.removeAll(cityId));
     }
-
+    public static void refreshAllSales() {
+        Iterator<Entry<Integer, Collection<Sale>>> it = mutableSalesMap.asMap().entrySet().iterator();
+        while (it.hasNext()) {
+            var next = it.next();
+            it.remove();
+            salesMap.put(next.getKey(), List.copyOf(next.getValue()));
+        }
+    }
     /**
      * Stores a sale in temporary map to later be added to the sales map with
      */
@@ -109,10 +116,6 @@ public final class DataFetcherManager {
 
     static void setCollectionMap(Map<String, CityCollection> newMap) {
         collectionMap = ImmutableMap.copyOf(newMap);
-    }
-
-    public static LocationDataFetcher getLocationFetcher() {
-        return LOCATION_FETCHER;
     }
 
     public static DataFetcher getSalesFetcher() {

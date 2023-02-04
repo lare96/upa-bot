@@ -2,10 +2,7 @@ package me.upa.service;
 
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
-import me.upa.UpaBot;
 import me.upa.UpaBotContext;
-import me.upa.discord.CreditTransaction;
-import me.upa.discord.CreditTransaction.CreditTransactionType;
 import me.upa.discord.PendingUpaMember;
 import me.upa.discord.SparkTrainMessageListener;
 import me.upa.discord.UpaMember;
@@ -14,7 +11,6 @@ import me.upa.fetcher.UserPropertiesDataFetcher;
 import me.upa.fetcher.UserPropertiesDataFetcher.UserProperty;
 import me.upa.sql.SqlConnectionManager;
 import me.upa.sql.SqlTask;
-import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.UserSnowflake;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -33,7 +29,6 @@ import java.util.Map.Entry;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
 
 public final class MemberVerificationMicroService extends MicroService {
 
@@ -82,7 +77,7 @@ public final class MemberVerificationMicroService extends MicroService {
                     }
                 }
                 connection.commit();
-                return new UpaMember(memberKey, memberId, inGameName, ctx.discord().guild().retrieveMemberById(memberId).complete().getEffectiveName(), blockchainAccountId, 0, 0, 0, 0, 0, 0, 0, claimedDailyAt, false, now);
+                return new UpaMember(memberKey, memberId, inGameName, ctx.discord().guild().retrieveMemberById(memberId).complete().getEffectiveName(), blockchainAccountId, 0, 0, 0, 0, 0, 0, 0, 0, claimedDailyAt, false, true, now);
             } finally {
                 connection.setAutoCommit(true);
             }
@@ -130,10 +125,7 @@ public final class MemberVerificationMicroService extends MicroService {
                                             }
                                             databaseCaching.getMembers().put(memberId, success);
                                             databaseCaching.getMemberNames().put(memberId, property.getOwnerUsername());
-                                            var guild = ctx.discord().guild();
-                                            guild.getTextChannelById(956790034097373204L).sendMessage("Welcome to the newest UPA member <@" + memberId + ">! We are now at **" + databaseCaching.getMembers().size() + "** members.").queue();
-                                            guild.retrieveMemberById(memberId).queue(loadedMember -> guild.addRoleToMember(UserSnowflake.fromId(memberId), guild.getRoleById(999013596111581284L)).queue());
-                                            ctx.propertySync().wakeUp();
+                                            welcomeNewMember(memberId, databaseCaching);
                                         },
                                         failure -> {
                                             if (nextMember.getPrice() != -1) {
@@ -155,6 +147,13 @@ public final class MemberVerificationMicroService extends MicroService {
         } catch (Exception e) {
             logger.catching(e);
         }
+    }
+
+    public void welcomeNewMember(long memberId, DatabaseCachingService databaseCaching) {
+        var guild = ctx.discord().guild();
+        guild.getTextChannelById(956790034097373204L).sendMessage("Welcome to the newest UPA member <@" + memberId + ">! We are now at **" + databaseCaching.getMembers().values().stream().filter(value -> value.getActive().get()).count() + "** members.").queue();
+        guild.retrieveMemberById(memberId).queue(loadedMember -> guild.addRoleToMember(UserSnowflake.fromId(memberId), guild.getRoleById(999013596111581284L)).queue());
+        ctx.propertySync().wakeUp();
     }
 
     public Cache<Long, PendingUpaMember> getPendingRegistrations() {

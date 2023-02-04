@@ -2,34 +2,41 @@ package me.upa.service;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
-import me.upa.UpaBot;
+import me.upa.UpaBotConstants;
 import me.upa.UpaBotContext;
-import me.upa.discord.DiscordService;
 import me.upa.discord.UpaBuildRequest;
+import me.upa.discord.UpaBuildRequest.BuildRequestResponse;
+import me.upa.discord.UpaBuildRequest.UpaBuildRequestComparator;
 import me.upa.discord.UpaBuildSlot;
 import me.upa.discord.UpaMember;
 import me.upa.discord.UpaProperty;
+import me.upa.fetcher.DataFetcherManager;
 import me.upa.fetcher.PropertyDataFetcher;
 import me.upa.fetcher.StructureDataFetcher;
+import me.upa.game.City;
+import me.upa.game.Neighborhood;
+import me.upa.game.Node;
 import me.upa.game.Property;
 import me.upa.game.Structure;
 import me.upa.sql.SqlConnectionManager;
 import net.dv8tion.jda.api.EmbedBuilder;
-import net.dv8tion.jda.api.MessageBuilder;
-import net.dv8tion.jda.api.MessageBuilder.Formatting;
-import net.dv8tion.jda.api.entities.Emoji;
-import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.UserSnowflake;
+import net.dv8tion.jda.api.entities.emoji.Emoji;
+import net.dv8tion.jda.api.exceptions.ErrorResponseException;
 import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.interactions.components.buttons.ButtonStyle;
+import net.dv8tion.jda.api.requests.ErrorResponse;
+import net.dv8tion.jda.api.utils.messages.MessageEditBuilder;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.*;
+import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -41,38 +48,98 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static me.upa.discord.DiscordService.DECIMAL_FORMAT;
 
+/**
+ * A {@link MicroService} implementation that manages both the Hollis and Global spark trains.
+ */
 public final class SparkTrainMicroService extends MicroService {
 
+    /**
+     * The possible states this service can be in.
+     */
     private enum State {
-        SPARK_TRAIN,
+        INITIAL_LOAD,
+        UPDATE_HOLLIS_SPARK,
 
-        STRUCTURES,
+        UPDATE_HOLLIS_STRUCTURES,
 
-        ROLES,
+        UPDATE_GLOBAL_SPARK,
 
-        REQUESTS
+        UPDATE_GLOBAL_STRUCTURES,
+
+        HOLLIS_REQUESTS,
+
+        UPDATE_ROLES
     }
 
-    public static final class SparkTrainMember implements Comparable<SparkTrainMember> {
+    private enum SparkTrainType {
+        HOLLIS,
+        GLOBAL
+    }
+
+    private static final class SparkTrain {
+        private static final EnumMap<SparkTrainType, SparkTrain> sparkTrainMap = new EnumMap<>(SparkTrainType.class);
+    }
+
+    /**
+     * A class representing a member of the spark train.
+     */
+    public static final class SparkTrainMember implements Comparable<SparkTrainMember>, Serializable {
+
+        private static final long serialVersionUID = 1665547923172420893L;
+        /**
+         * Their in-game name.
+         */
         private final String name;
+
+        /**
+         * The amount they're staking.
+         */
         private final double staking;
+
+        /**
+         * The amount of tracked buildings they've completed.
+         */
         private final int completedCount;
+
+        /**
+         * The amount of tracked buildings they have in progress.
+         */
         private final int buildingCount;
+
+        /**
+         * Their total spark hours given.
+         */
         private final double sparkHoursGiven;
+
+        /**
+         * Their total spark hours received.
+         */
         private final double sparkHoursReceived;
 
-        private final UpaMember upaMember;
+        /**
+         * The UPA member instance.
+         */
+        private transient final UpaMember upaMember;
 
-        public SparkTrainMember(String name, double staking, int completedCount, int buildingCount, double sparkHoursGiven, double sparkHoursReceived, UpaMember upaMember) {
+        private final boolean global;
+        private final long memberId;
+
+        /**
+         * Creates a new {@link SparkTrainMember}.
+         */
+        public SparkTrainMember(String name, double staking, int completedCount, int buildingCount, double sparkHoursGiven,
+                                double sparkHoursReceived, UpaMember upaMember, boolean global) {
             this.name = name;
             this.staking = staking;
             this.completedCount = completedCount;
@@ -80,6 +147,8 @@ public final class SparkTrainMicroService extends MicroService {
             this.sparkHoursGiven = sparkHoursGiven;
             this.sparkHoursReceived = sparkHoursReceived;
             this.upaMember = upaMember;
+            this.global = global;
+            memberId = upaMember.getMemberId();
         }
 
         @Override
@@ -110,7 +179,7 @@ public final class SparkTrainMicroService extends MicroService {
         }
 
         public double computeScore() {
-            return (sparkHoursGiven - sparkHoursReceived) + upaMember.getSsh().get();
+            return upaMember.getTotalSsh(global);
         }
 
         public String getName() {
@@ -140,37 +209,61 @@ public final class SparkTrainMicroService extends MicroService {
         public UpaMember getUpaMember() {
             return upaMember;
         }
+
+        public long getMemberId() {
+            return memberId;
+        }
     }
 
-    private static final Path BUILDS_PATH = Paths.get("data", "builds.bin");
-    private static final String COMMENT_ID = "990519031301832725";
+    private static final int PREVIOUS_BUILDS_TRACKED = 10;
+    private static final int PREVIOUS_BUILDS_LIMIT = 6;
+    private static final Path HOLLIS_BUILDS_PATH = Paths.get("data", "hollis_builds.bin");
+    private static final Path GLOBAL_BUILDS_PATH = Paths.get("data", "global_builds.bin");
+    private static final Path HOLLIS_PREVIOUS_PATH = Paths.get("data", "last_hollis_builds.bin");
+    private static final Path GLOBAL_PREVIOUS_PATH = Paths.get("data", "last_global_builds.bin");
+
+    private static final Path BUILD_REQUEST_RESPONSES_PATH = Paths.get("data", "build_request_responses.bin");
+
     private static final Logger logger = LogManager.getLogger();
 
     private final Map<String, Structure> structureData = new ConcurrentHashMap<>();
 
-    private final Map<Long, UpaBuildRequest> buildRequests = new ConcurrentHashMap<>();
+    private final Map<Long, UpaBuildRequest> hollisBuildRequests = new ConcurrentHashMap<>();
+    private final Map<Long, UpaBuildRequest> globalBuildRequests = new ConcurrentHashMap<>();
 
-    private final ConcurrentLinkedQueue<UpaBuildSlot> buildSlots = new ConcurrentLinkedQueue<>();
-    private volatile State currentState = State.SPARK_TRAIN;
-    private volatile Instant lastAnnouncement = Instant.now();
+    private final ConcurrentLinkedQueue<UpaBuildSlot> hollisBuildSlots = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<UpaBuildSlot> globalBuildSlots = new ConcurrentLinkedQueue<>();
+
+    private final ConcurrentLinkedQueue<UpaBuildSlot> lastHollisBuilds = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<UpaBuildSlot> lastGlobalBuilds = new ConcurrentLinkedQueue<>();
+
+    private final AtomicReference<Instant> nextRolesUpdate = new AtomicReference<>();
+    private volatile State currentState = State.INITIAL_LOAD;
     private final UpaBotContext ctx;
+
+    private volatile boolean paused;
+
+    public void pauseQueries() {
+        paused = true;
+    }
+
+    public void resumeQueries() {
+        paused = false;
+    }
 
     public SparkTrainMicroService(UpaBotContext ctx) {
         super(Duration.ofMinutes(1));
         this.ctx = ctx;
     }
 
+
     @Override
     public void startUp() throws Exception {
-        ConcurrentLinkedQueue<UpaBuildSlot> loadedBuildQueue = Files.exists(BUILDS_PATH) ? ctx.load(BUILDS_PATH) : null;
-        if (loadedBuildQueue != null) {
-            buildSlots.addAll(loadedBuildQueue);
-        }
-        DiscordService discordService = ctx.discord();
-        Message message = discordService.guild().getTextChannelById(990518630129221652L).retrieveMessageById(COMMENT_ID).complete();
-        if (message == null) {
-            throw new Exception("No spark train comment.");
-        }
+        nextRolesUpdate.set(Instant.now().plusSeconds(7200));
+        loadQueue(HOLLIS_BUILDS_PATH, hollisBuildSlots);
+        loadQueue(GLOBAL_BUILDS_PATH, globalBuildSlots);
+        loadQueue(HOLLIS_PREVIOUS_PATH, lastHollisBuilds);
+        loadQueue(GLOBAL_PREVIOUS_PATH, lastGlobalBuilds);
         var structureFetcher = new StructureDataFetcher();
         structureFetcher.waitUntilDone().forEach(next -> structureData.put(next.getName(), next));
         try (Connection connection = SqlConnectionManager.getInstance().take();
@@ -179,113 +272,126 @@ public final class SparkTrainMicroService extends MicroService {
             while (results.next()) {
                 long memberId = results.getLong(1);
                 long propertyId = results.getLong(2);
-                String structureName = results.getString(3);
-                String address = ctx.databaseCaching().getProperties().get(propertyId).getAddress();
-                UpaBuildRequest request = new UpaBuildRequest(memberId, propertyId, structureName);
-                request.setAddress(address);
-                buildRequests.put(memberId, request);
+                String structureName = results.getString(4);
+                boolean isGlobal = results.getBoolean(5);
+                String address = results.getString(3);
+                UpaBuildRequest request = new UpaBuildRequest(memberId, propertyId, structureName, address);
+                if (isGlobal) {
+                    globalBuildRequests.put(memberId, request);
+                } else {
+                    hollisBuildRequests.put(memberId, request);
+                }
             }
         }
-        computeLeastRequiredSsh();
         run();
     }
 
     @Override
     public void run() throws Exception {
+        nextRolesUpdate.getAndUpdate(last -> {
+            if (Instant.now().isAfter(last)) { // Update staking roles once every 2 hours.
+                ctx.discord().execute(this::updateRoles);
+                return last.plusSeconds(7200);
+            }
+            return last;
+        });
         switch (currentState) {
-            case SPARK_TRAIN:
-                if (ctx.discord().getSparkTrain().getListeningFor().compareAndSet(null, "!statistic all")) {
-                    ctx.discord().guild().getTextChannelById(979640542805782568L).sendMessage("!statistic all").queue();
-                }
-                currentState = State.STRUCTURES;
+            case INITIAL_LOAD:
+                checkAllBuildRequests(globalBuildSlots, lastGlobalBuilds, globalBuildRequests);
+                checkAllBuildRequests(hollisBuildSlots, lastHollisBuilds, hollisBuildRequests);
+                currentState = State.UPDATE_HOLLIS_SPARK;
                 break;
-            case STRUCTURES:
-                if (ctx.discord().getSparkTrain().getListeningFor().compareAndSet(null, "!list all:hollis-queens")) {
-                    ctx.discord().guild().getTextChannelById(979640542805782568L).sendMessage("!list all:hollis-queens").queue();
+            case UPDATE_HOLLIS_SPARK:
+                if(paused) {
+                    return;
                 }
-                currentState = State.ROLES;
+                queryUplandData("!statistics:hollis-queens");
+                currentState = State.UPDATE_GLOBAL_SPARK;
                 break;
-            case ROLES:
-                Role staker = ctx.discord().guild().getRoleById(965427810707595394L);
-                for (UpaMember upaMember : ctx.databaseCaching().getMembers().values()) {
-                    if (upaMember.getSparkTrainPlace().get() > 0) {
-                        ctx.discord().guild().addRoleToMember(UserSnowflake.fromId(upaMember.getMemberId()), staker).queue();
-                    } else {
-                        ctx.discord().guild().removeRoleFromMember(UserSnowflake.fromId(upaMember.getMemberId()), staker).queue();
-                    }
+            case UPDATE_GLOBAL_SPARK:
+                if(paused) {
+                    return;
                 }
-                currentState = State.REQUESTS;
+                queryUplandData("!statistics");
+                handleRequests(HOLLIS_BUILDS_PATH, hollisBuildSlots, hollisBuildRequests);
+                currentState = State.UPDATE_HOLLIS_STRUCTURES;
                 break;
-            case REQUESTS:
-                // Update existing build slots, announce when completed.
-                updateBuildSlots();
-
-                // Attempt to add to the build queue.
-                Collection<UpaBuildRequest> existingRequests = ctx.sparkTrain().getBuildRequests().values();
-                if (!existingRequests.isEmpty()) {
-                    // Sort all requests from highest -> lowest SSH.
-                    List<UpaBuildRequest> requests = new ArrayList<>(existingRequests);
-                    requests.sort((o1, o2) -> {
-                        double o1Ssh = ctx.databaseCaching().getMembers().get(o1.getMemberId()).getTotalSsh();
-                        double o2Ssh = ctx.databaseCaching().getMembers().get(o2.getMemberId()).getTotalSsh();
-                        return Double.compare(o2Ssh, o1Ssh);
-                    });
-
-                    try {
-                        // Genesis properties come first.
-                        for (UpaBuildRequest buildRequest : requests) {
-                            UpaProperty property = ctx.databaseCaching().getProperties().get(buildRequest.getPropertyId());
-                            if (property != null && property.isGenesis()) {
-                                if (!addBuildSlot(buildRequest, property)) {
-                                    break;
-                                }
-                            }
-                        }
-
-                        // No genesis properties were found, check all others.
-                        for (UpaBuildRequest buildRequest : requests) {
-                            UpaProperty property = ctx.databaseCaching().getProperties().get(buildRequest.getPropertyId());
-                            if (property != null) {
-                                if (!addBuildSlot(buildRequest, property)) {
-                                    break;
-                                }
-                            }
-                        }
-                    } finally {
-                        ctx.save(BUILDS_PATH, buildSlots);
-                    }
-                }
-                currentState = State.SPARK_TRAIN;
-                announceBuildSlots();
+            case UPDATE_HOLLIS_STRUCTURES:
+                //  queryUplandData("!list all:hollis-queens");
+                handleRequests(GLOBAL_BUILDS_PATH, globalBuildSlots, globalBuildRequests);
+                currentState = State.UPDATE_GLOBAL_STRUCTURES;
+                break;
+            case UPDATE_GLOBAL_STRUCTURES:
+                //  queryUplandData("!list all");
+                currentState = State.UPDATE_HOLLIS_SPARK;
                 break;
         }
     }
 
-    public void editComment(Message content, Consumer<Message> onSuccess) {
-        ctx.discord().guild().getTextChannelById(990518630129221652L).retrieveMessageById(COMMENT_ID).queue(success -> success.editMessage(content).queue(onSuccess));
+    private void loadQueue(Path queuePath, ConcurrentLinkedQueue<UpaBuildSlot> buildSlots) {
+        ConcurrentLinkedQueue<UpaBuildSlot> loadedBuildQueue = Files.exists(queuePath) ? ctx.load(queuePath) : null;
+        if (loadedBuildQueue != null) {
+            buildSlots.addAll(loadedBuildQueue);
+        }
     }
 
-    private volatile Structure leastRequiredSsh;
-
-    public int getLeastRequiredSsh() {
-        return leastRequiredSsh.getSshRequired();
+    private void loadMap(Map<Long, BuildRequestResponse> responsesMap) {
+        ConcurrentHashMap<Long, BuildRequestResponse> loadedResponsesMap = Files.exists(SparkTrainMicroService.BUILD_REQUEST_RESPONSES_PATH) ?
+                ctx.load(SparkTrainMicroService.BUILD_REQUEST_RESPONSES_PATH) : null;
+        if (loadedResponsesMap != null) {
+            responsesMap.putAll(loadedResponsesMap);
+        }
     }
 
-    public Structure getLeastRequiredSshStructure() {
-        return leastRequiredSsh;
+    private void queryUplandData(String query) {
+        if (ctx.discord().getSparkTrain().getListeningFor().compareAndSet(null, query)) {
+            ctx.discord().guild().getTextChannelById(979640542805782568L).sendMessage(query).queue();
+        }
     }
 
-    private void computeLeastRequiredSsh() {
-        Structure lastStructure = null;
-        for (Structure structure : structureData.values()) {
-            if (lastStructure == null || structure.getSshRequired() < lastStructure.getSshRequired()) {
-                lastStructure = structure;
+    private void handleRequests(Path dbPath,
+                                ConcurrentLinkedQueue<UpaBuildSlot> buildSlots,
+                                Map<Long, UpaBuildRequest> buildRequests) throws Exception {
+        // Update existing build slots, announce when completed.
+        boolean global = buildSlots == globalBuildSlots;
+        ConcurrentLinkedQueue<UpaBuildSlot> lastBuildSlots = global ? lastGlobalBuilds : lastHollisBuilds;
+        Path lastBuildPath = global ? GLOBAL_PREVIOUS_PATH : HOLLIS_PREVIOUS_PATH;
+        updateBuildSlots(buildSlots, lastBuildSlots, lastBuildPath);
+
+        // Attempt to add to the build queue.
+        Collection<UpaBuildRequest> existingRequests = buildRequests.values();
+        if (!existingRequests.isEmpty()) {
+            // Sort all requests from highest -> lowest SSH.
+            List<UpaBuildRequest> requests = new ArrayList<>(existingRequests);
+
+            requests.sort(new UpaBuildRequestComparator(ctx, global));
+            try {
+                // Genesis properties come first.
+                if (!global) {
+                    for (UpaBuildRequest buildRequest : requests) {
+                        UpaProperty property = ctx.databaseCaching().getProperties().get(buildRequest.getPropertyId());
+                        if (property != null && property.isGenesis()) {
+                            if (!addBuildSlot(buildSlots, lastBuildSlots, buildRequests, buildRequest)) {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // No genesis properties were found, check all others.
+                for (UpaBuildRequest buildRequest : requests) {
+                    if (!addBuildSlot(buildSlots, lastBuildSlots, buildRequests, buildRequest)) {
+                        break;
+                    }
+                }
+            } finally {
+                ctx.save(dbPath, buildSlots);
             }
         }
-        leastRequiredSsh = lastStructure;
+        announceBuildSlots(buildSlots);
     }
 
-    public boolean hasActiveBuild(long memberId) {
+    public boolean hasActiveBuild(ConcurrentLinkedQueue<UpaBuildSlot> buildSlots, long memberId) {
         for (UpaBuildSlot slot : buildSlots) {
             if (slot.getMemberId() == memberId) {
                 return true;
@@ -294,8 +400,9 @@ public final class SparkTrainMicroService extends MicroService {
         return false;
     }
 
-    public void updateBuildSlots() {
-        Iterator<UpaBuildSlot> it = buildSlots.iterator();
+    private void updateBuildSlots(ConcurrentLinkedQueue<UpaBuildSlot> slots, ConcurrentLinkedQueue<UpaBuildSlot> lastSlots, Path lastSlotsPath) {
+        boolean removed = false;
+        Iterator<UpaBuildSlot> it = slots.iterator();
         while (it.hasNext()) {
             UpaBuildSlot slot = it.next();
             try {
@@ -304,61 +411,206 @@ public final class SparkTrainMicroService extends MicroService {
                     slot.getCompletionPercent().set(property.getBuildPercentage());
                     slot.getSparkStaked().set(property.getStakedSpark());
                     slot.getFinishedAt().set(property.getFinishedAt());
+                    City city = DataFetcherManager.getCityMap().get(property.getCityId());
+                    if (city != null)
+                        slot.getCityName().set(city.getName());
+                    Neighborhood neighborhood = PropertySynchronizationService.getNeighborhood(property);
+                    if (neighborhood != null)
+                        slot.getNeighborhoodName().set(neighborhood.getName());
                 }
                 if (slot.getCompletionPercent().get() >= 100.0) {
+                    removed = true;
                     it.remove();
+                    lastSlots.add(slot);
+                    if (lastSlots.size() > PREVIOUS_BUILDS_TRACKED) {
+                        lastSlots.poll();
+                    }
                 }
             } catch (Exception e) {
                 logger.catching(e);
             }
         }
+        if (removed) {
+            ctx.save(lastSlotsPath, lastSlots);
+        }
     }
 
-    public boolean addBuildSlot(UpaBuildRequest request, UpaProperty requestProperty) throws Exception {
+    private void updateRoles() {
+        Role staker = ctx.discord().guild().getRoleById(965427810707595394L);
+        for (UpaMember upaMember : ctx.databaseCaching().getMembers().values()) {
+            if (!upaMember.getActive().get()) {
+                continue;
+            }
+            try {
+                if (upaMember.getHollisSparkTrainPlace().get() > 0 ||
+                        upaMember.getGlobalSparkTrainPlace().get() > 0) {
+                    ctx.discord().guild().addRoleToMember(UserSnowflake.fromId(upaMember.getMemberId()), staker).complete();
+                } else {
+                    ctx.discord().guild().removeRoleFromMember(UserSnowflake.fromId(upaMember.getMemberId()), staker).complete();
+                }
+            } catch (ErrorResponseException e) {
+                if (e.getErrorResponse() != ErrorResponse.UNKNOWN_MEMBER) {
+                    logger.error(e);
+                }
+            } catch (Exception e) {
+                logger.error(e);
+            }
+        }
+    }
+
+    private boolean hasHighestSsh(Map<Long, UpaBuildRequest> buildRequests, long memberId) {
+        double highest = 0;
+        long highestMemberId = 0;
+        boolean global = buildRequests == globalBuildRequests;
+        for (UpaBuildRequest request : buildRequests.values()) {
+            UpaMember checkMember = ctx.databaseCaching().getMembers().get(request.getMemberId());
+            if (checkMember == null || !checkMember.getActive().get()) {
+                continue;
+            }
+            double check = checkMember.getTotalSsh(global);
+            if (check > highest) {
+                highest = check;
+                highestMemberId = checkMember.getMemberId();
+            }
+        }
+        return highestMemberId == memberId;
+    }
+
+    public boolean addBuildSlot(ConcurrentLinkedQueue<UpaBuildSlot> buildSlots,
+                                ConcurrentLinkedQueue<UpaBuildSlot> lastBuildSlots,
+                                Map<Long, UpaBuildRequest> buildRequests,
+                                UpaBuildRequest request) throws Exception {
         boolean addSlot = true;
         if (buildSlots.size() > 0) {
             List<UpaBuildSlot> slotList = new ArrayList<>(buildSlots);
             UpaBuildSlot slot = slotList.get(slotList.size() - 1);
-            if (slot.getFillPercent() >= 80.0) {
-                lastAnnouncement = Instant.now().minus(1, ChronoUnit.DAYS);
-            } else {
+            Instant now = Instant.now();
+            Instant then = slot.getFinishedAt().get();
+            Duration between = then == null ? Duration.ofDays(2) : Duration.between(now, then);
+            if (slot.getFillPercent() < 80.0 && between.toHours() > 48) {
                 addSlot = false;
             }
         }
 
         if (addSlot) {
-            Property property = PropertyDataFetcher.fetchPropertySynchronous(Long.toString(request.getPropertyId()));
-            if (property == null) {
-                throw new IllegalStateException("Could not load next property for build slot.");
-            }
-            if (property.getFinishedAt() == null) {
-                if (request.getNotified().compareAndSet(false, true)) {
-                    String msg = "Please start construction of **" + request.getStructureName() + "** on **" + property.getFullAddress() + "** to be accepted onto the build queue.";
-                    ctx.discord().guild().retrieveMemberById(request.getMemberId()).queue(success -> {
-                        success.getUser().openPrivateChannel().queue(privateChannel ->
-                                privateChannel.sendMessage(msg).queue());
-                        ctx.discord().guild().getTextChannelById(963112034726195210L).sendMessage(success.getAsMention() + " " + msg).queue();
-                    });
-                }
-                return true;
-            }
-            try (Connection connection = SqlConnectionManager.getInstance().take();
-                 PreparedStatement ps = connection.prepareStatement("DELETE FROM build_requests WHERE member_id = ?;")) {
-                ps.setLong(1, request.getMemberId());
-                if (ps.executeUpdate() == 1) {
-                    buildSlots.add(new UpaBuildSlot(request.getMemberId(), request.getPropertyId(), request.getStructureName(), property.getFullAddress(), property.getMaxStakedSpark(), property.getFinishedAt(), property.getStakedSpark(), property.getBuildPercentage()));
-                    buildRequests.remove(request.getMemberId());
-                    ctx.discord().guild().getTextChannelById(979640542805782568L).sendMessage("!add:hollis-queens:" + property.getFullAddress() + ",Queens").queue();
+            boolean isHollis = buildSlots == hollisBuildSlots;
+            BuildRequestResponse response = checkBuildRequest(buildSlots, lastBuildSlots, buildRequests, request);
+            request.setResponse(response);
+            switch (response) {
+                case NOT_STARTED:
+                    if (request.getNotified().compareAndSet(false, true)) {
+                        String msg = "Please start construction of **" + request.getStructureName() + "** on **" + request.getAddress() + "** to be accepted onto the **" + (isHollis ? "Hollis" : "global") + "** build queue.";
+                        ctx.discord().guild().retrieveMemberById(request.getMemberId()).queue(success -> {
+                            success.getUser().openPrivateChannel().queue(privateChannel ->
+                                    privateChannel.sendMessage(msg).queue());
+                            ctx.discord().guild().getTextChannelById(isHollis ? 963112034726195210L :
+                                    956790034097373204L).sendMessage(success.getAsMention() + " " + msg).queue();
+                        });
+                    }
+                case TOO_MANY_BUILDS:
+                    if (request.getNotified().compareAndSet(false, true)) {
+                        String msg = "You have exceeded the threshold of having 6 of the last 10 builds on the train. Please make build requests for bigger structures to avoid this problem in the future.";
+                        ctx.discord().guild().retrieveMemberById(request.getMemberId()).queue(success -> {
+                            success.getUser().openPrivateChannel().queue(privateChannel ->
+                                    privateChannel.sendMessage(msg).queue());
+                        });
+                    }
                     return true;
-                }
-            } catch (Exception e) {
-                logger.catching(e);
+                case NORMAL:
+                    Property property = request.getLoadedProperty();
+                    if (property == null) {
+                        return true;
+                    }
+                    try (Connection connection = SqlConnectionManager.getInstance().take();
+                         PreparedStatement ps = connection.prepareStatement("DELETE FROM build_requests WHERE member_id = ? AND global_train = ?;")) {
+                        ps.setLong(1, request.getMemberId());
+                        ps.setBoolean(2, !isHollis);
+                        if (ps.executeUpdate() == 1) {
+                            buildSlots.add(new UpaBuildSlot(request.getMemberId(), request.getPropertyId(), request.getStructureName(), property.getFullAddress(), property.getMaxStakedSpark(), property.getFinishedAt(), property.getStakedSpark(), property.getBuildPercentage()));
+                            buildRequests.remove(request.getMemberId());
+                            String query = isHollis ? "!add:hollis-queens:" : "!add:";
+                            String cityName = DataFetcherManager.getCityMap().get(property.getCityId()).getName();
+                            ctx.discord().guild().getTextChannelById(979640542805782568L).sendMessage(query + property.getFullAddress() + "," + cityName).queue();
+                            ctx.discord().guild().retrieveMemberById(request.getMemberId()).queue(member ->
+                                    member.getUser().openPrivateChannel().queue(channel ->
+                                            channel.sendMessage("Your build request for **" + request.getStructureName() + "** on **" + request.getAddress() + "** has been accepted and is now on the **" + (isHollis ? "Hollis" : "global") + "** queue!").queue()));
+                            return false;
+                        }
+                    } catch (Exception e) {
+                        logger.catching(e);
+                    }
+                    return true;
             }
         }
-        return false;
+        return true;
     }
 
-    public void announceBuildSlots() {
+    private void checkAllBuildRequests(ConcurrentLinkedQueue<UpaBuildSlot> buildSlots,
+                                       ConcurrentLinkedQueue<UpaBuildSlot> lastBuildSlots,
+                                       Map<Long, UpaBuildRequest> buildRequests) throws Exception {
+        for (UpaBuildRequest request : buildRequests.values()) {
+            request.setResponse(checkBuildRequest(buildSlots, lastBuildSlots, buildRequests, request));
+        }
+    }
+
+    public boolean hasBuildRequest(long memberId) {
+        return globalBuildRequests.containsKey(memberId) || hollisBuildRequests.containsKey(memberId);
+    }
+
+    public BuildRequestResponse checkBuildRequest(ConcurrentLinkedQueue<UpaBuildSlot> buildSlots,
+                                                  ConcurrentLinkedQueue<UpaBuildSlot> lastBuildSlots,
+                                                  Map<Long, UpaBuildRequest> buildRequests,
+                                                  UpaBuildRequest request) throws Exception {
+        boolean isHollis = buildSlots == hollisBuildSlots;
+        UpaMember upaMember = ctx.databaseCaching().getMembers().get(request.getMemberId());
+        if (upaMember == null || !upaMember.getActive().get()) {
+            return BuildRequestResponse.ERROR;
+        }
+        Guild guild = ctx.discord().guild();
+        Role role = guild.getRoleById(963449135485288479L);
+        boolean isVip = guild.retrieveMemberById(upaMember.getMemberId()).complete().getRoles().contains(role);
+        if (!isVip && hasActiveBuild(buildSlots, upaMember.getMemberId())) {
+            return BuildRequestResponse.HAS_ACTIVE_BUILD;
+        }
+        Structure structure = structureData.get(request.getStructureName());
+        if (structure == null) {
+            logger.error("Structure " + request.getStructureName() + " invalid.");
+            return BuildRequestResponse.ERROR;
+        }
+        int count = 0;
+        for (UpaBuildSlot slot : lastBuildSlots) {
+            if (slot.getMemberId() == request.getMemberId()) {
+                count++;
+            }
+        }
+        if (count >= PREVIOUS_BUILDS_LIMIT) {
+            return BuildRequestResponse.TOO_MANY_BUILDS;
+        }
+        boolean firstBuild = ctx.databaseCaching().getMemberProperties().get(upaMember.getKey()).stream().
+                noneMatch(next -> next.getBuildStatus().get().equals("Completed"));
+        double ssh = upaMember.getTotalSsh(!isHollis);
+        boolean inNode = ctx.databaseCaching().getProperties().containsKey(request.getPropertyId());
+        boolean hasSsh = ssh >= structure.getSshRequired(firstBuild, !isHollis, inNode);
+        boolean freePass = !hasSsh && hasHighestSsh(buildRequests, upaMember.getMemberId());
+        if (!hasSsh && !freePass) {
+            return BuildRequestResponse.NOT_ENOUGH_SSH;
+        }
+        Property property = PropertyDataFetcher.fetchPropertySynchronous(request.getPropertyId());
+        if (property == null) {
+            throw new IllegalStateException("Could not load next property for build slot.");
+        }
+        request.setLoadedProperty(property);
+        boolean hasStructure = property.getBuildStatus().equals("Completed");
+        if (hasStructure) {
+            return BuildRequestResponse.HAS_STRUCTURE;
+        } else if (property.getFinishedAt() == null) {
+            return BuildRequestResponse.NOT_STARTED;
+        }
+        return BuildRequestResponse.NORMAL;
+    }
+
+    public void announceBuildSlots(ConcurrentLinkedQueue<UpaBuildSlot> buildSlots) {
+        boolean isHollis = buildSlots == hollisBuildSlots;
         int size = buildSlots.size();
         if (size > 0) {
             int place = 1;
@@ -382,23 +634,31 @@ public final class SparkTrainMicroService extends MicroService {
                 } else {
                     formatTimeLeft = "Under a minute";
                 }
-                embedList.add(new EmbedBuilder().setTitle(getPlaceEmoji(place++).getAsMention() + " " + slot.getAddress()).
+                Emoji placeEmoji = getPlaceEmoji(place++);
+                String str = placeEmoji == null ? "" : placeEmoji.getFormatted();
+                EmbedBuilder bldr = new EmbedBuilder();
+                bldr.setTitle(str + " " + slot.getAddress() + (!isHollis ? ", " + slot.getCityName().get() : "")).
+                        addField("Structure", slot.getStructureName(), false).
                         addField("Time left", formatTimeLeft, false).
-                        addField("Owner", "<@" + slot.getMemberId() + ">", false).
-                        addField("Spark total", slot.getSparkStaked() + "/" + slot.getMaxSparkStaked(), false).
+                        addField("Owner", "<@" + slot.getMemberId() + ">", false);
+                if (!isHollis) {
+                    bldr.addField("Neighborhood", slot.getNeighborhoodName().get(), false); // TODO slot should have property cached initially
+                }
+                bldr.addField("Spark total", slot.getSparkStaked() + "/" + slot.getMaxSparkStaked(), false).
                         addField("Property link", "https://play.upland.me/?prop_id=" + slot.getPropertyId(), false).
-                        setColor(color).
-                        build());
+                        setColor(color);
+                embedList.add(bldr.build());
             }
-            ctx.discord().guild().getTextChannelById(963108957784772659L).
-                    retrieveMessageById(992885758581035181L).
-                    queue(success -> success.editMessage(new MessageBuilder().append(":zap: :zap: ").
-                            append("Where do I stake my spark?", Formatting.BOLD, Formatting.UNDERLINE).
-                            append(" :zap: :zap:").setEmbeds(embedList).setActionRows(ActionRow.of(
-                                    Button.of(ButtonStyle.PRIMARY, "manage_build_request", "Manage build request", Emoji.fromUnicode("U+1F3D7")),
-                                    Button.of(ButtonStyle.PRIMARY, "view_build_requests", "View build requests", Emoji.fromUnicode("U+1F477"))
+            ctx.discord().guild().getTextChannelById(isHollis ? UpaBotConstants.HOLLIS_TRAIN_CHANNEL : UpaBotConstants.GLOBAL_TRAIN_CHANNEL).
+                    retrieveMessageById(isHollis ? 1025484301053210664L : 1026889215792926810L).
+                    queue(success -> success.editMessage(new MessageEditBuilder().
+                            setContent(":zap: :zap: __**Where do I stake my spark?**__ :zap: :zap:").
+                            setEmbeds(embedList).setComponents(ActionRow.of(
+                                    Button.of(ButtonStyle.PRIMARY, isHollis ? "manage_build_request" : "manage_build_request_global", "Manage build request", Emoji.fromUnicode("U+1F3D7")),
+                                    Button.of(ButtonStyle.PRIMARY, isHollis ? "view_build_requests" : "view_build_requests_global", "View build requests", Emoji.fromUnicode("U+1F477")),
+                                    Button.of(ButtonStyle.PRIMARY, isHollis ? "st_hollis" : "st_global", "Spark train", Emoji.fromUnicode("U+1F682")),
+                                    Button.of(ButtonStyle.PRIMARY, isHollis ? "st_hollis_guidelines" : "st_global_guidelines", "Guidelines", Emoji.fromUnicode("U+1F4DC"))
                             )).build()).queue());
-            lastAnnouncement = Instant.now();
         }
     }
 
@@ -424,8 +684,9 @@ public final class SparkTrainMicroService extends MicroService {
                 return Emoji.fromUnicode("U+0039 U+20E3");
             case 10:
                 return Emoji.fromUnicode("U+1F51F U+20E3");
+            default:
+                return null;
         }
-        throw new IllegalStateException("Invalid place number.");
     }
 
     public Map<String, Structure> getStructureData() {
@@ -450,11 +711,19 @@ public final class SparkTrainMicroService extends MicroService {
         return structures;
     }
 
-    public Map<Long, UpaBuildRequest> getBuildRequests() {
-        return buildRequests;
+    public Map<Long, UpaBuildRequest> getHollisBuildRequests() {
+        return hollisBuildRequests;
     }
 
-    public ConcurrentLinkedQueue<UpaBuildSlot> getBuildSlots() {
-        return buildSlots;
+    public Map<Long, UpaBuildRequest> getGlobalBuildRequests() {
+        return globalBuildRequests;
+    }
+
+    public ConcurrentLinkedQueue<UpaBuildSlot> getHollisBuildSlots() {
+        return hollisBuildSlots;
+    }
+
+    public ConcurrentLinkedQueue<UpaBuildSlot> getGlobalBuildSlots() {
+        return globalBuildSlots;
     }
 }

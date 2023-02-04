@@ -1,12 +1,9 @@
 package me.upa.variable;
 
-import me.upa.UpaBot;
 import me.upa.UpaBotContext;
 
-import java.io.Serializable;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static me.upa.variable.SystemVariableRepository.BASE_PATH;
@@ -36,6 +33,11 @@ public class SystemVariable<T> {
         filePath = BASE_PATH.resolve(name + ".bin");
     }
 
+    public void set(T newValue) {
+        value.set(newValue);
+        save();
+    }
+
     public void access(Function<AtomicReference<T>, Boolean> accessFunc) {
         if (accessFunc.apply(value)) {
             save();
@@ -59,7 +61,7 @@ public class SystemVariable<T> {
         ctx.save(filePath, value);
     }
 
-    public T getValue() {
+    public T get() {
         return value.get();
     }
 

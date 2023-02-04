@@ -1,33 +1,24 @@
 package me.upa.discord;
 
 import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.Uninterruptibles;
 import me.upa.UpaBotContext;
 import me.upa.fetcher.VisitFeeBlockchainDataFetcher;
 import me.upa.game.BlockchainVisitFee;
-import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.MessageEmbed;
-import net.dv8tion.jda.api.entities.Role;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.Serializable;
 import java.time.DayOfWeek;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoField;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
-import java.time.temporal.TemporalUnit;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicLong;
 
 public final class WeeklyReportData implements Serializable {
 
@@ -42,9 +33,9 @@ public final class WeeklyReportData implements Serializable {
             setNextMarker();
         }
     }
+    //TODO save last fetched date even if nothing is there
 
     public void process(UpaBotContext ctx) throws ExecutionException, InterruptedException {
-        Instant origin = computeOrigin();
         boolean ready = isReady();
         if (ready && !reports.isEmpty()) {
             Iterator<PendingWeeklyReport> it = reports.values().iterator();
@@ -53,10 +44,12 @@ public final class WeeklyReportData implements Serializable {
                 if (pendingReport.isReady()) {
                     it.remove();
                     long memberId = pendingReport.getMemberId();
-                    MessageEmbed embed = pendingReport.generate(origin);
-                    ctx.discord().guild().retrieveMemberById(memberId).queue(success ->
-                            success.getUser().openPrivateChannel().queue(privateChannel ->
-                                    privateChannel.sendMessageEmbeds(embed).queue()));
+                    MessageEmbed embed = pendingReport.generate(pendingReport.getOrigin());
+                 //   ctx.discord().guild().retrieveMemberById(memberId).queue(success ->
+          //                  success.getUser().openPrivateChannel().queue(privateChannel ->
+            //                        privateChannel.sendMessageEmbeds(embed).queue()));
+                 //   ctx.discord().guild().getTextChannelById(984570735282491452L).sendMessage(new MessageBuilder().
+                //            append("<@").append(String.valueOf(memberId)).append(">").setEmbeds(embed).build()).queue();
                 }
             }
             if (reports.isEmpty()) {
@@ -65,9 +58,13 @@ public final class WeeklyReportData implements Serializable {
             }
         }
 
-        Guild guild = ctx.discord().guild();
-        Role vip = guild.getRoleById(956795779241111612L);
+   //    Guild guild = ctx.discord().guild();
+        //Role vip = guild.getRoleById(963449135485288479L);
+        Instant origin = computeOrigin();
         for (UpaMember upaMember : ctx.databaseCaching().getMembers().values()) {
+            if(!upaMember.getActive().get()) {
+                continue;
+            }
             long memberId = upaMember.getMemberId();
             Member member = ctx.discord().guild().retrieveMemberById(memberId).complete();
             if (/*member.getRoles().contains(vip)*/ member.getIdLong() == 220622659665264643L ||
@@ -82,11 +79,15 @@ public final class WeeklyReportData implements Serializable {
             if(!searched.add(memberId)) {
                 continue;
             }
-            Instant startFrom = pendingReport.getLastQuery().compareAndExchange(null, origin);
-            startFrom = startFrom == null ? origin : startFrom;
+            Instant startFrom = pendingReport.getLastQuery().compareAndExchange(null, pendingReport.getOrigin());
             VisitFeeBlockchainDataFetcher fetcher = new VisitFeeBlockchainDataFetcher(pendingReport.getBlockchainAccountId(), startFrom, sendMarker);
             BlockchainVisitFee visitFee = fetcher.fetch().get();
-            if (visitFee.getLastTimestamp() == null || visitFee.getAmount() < 1) {
+            if(visitFee == null) {
+                System.out.println("here");
+                break;
+            }
+            Instant last = pendingReport.getLastQuery().get();
+            if (visitFee.getLastTimestamp() == null || visitFee.getAmount() < 1 || Objects.equals(visitFee.getLastTimestamp(), last)) {
                 if (ready) {
                     pendingReport.setFinished();
                 }
@@ -94,6 +95,7 @@ public final class WeeklyReportData implements Serializable {
             }
             pendingReport.getVisitFees().addAndGet(visitFee.getAmount());
             pendingReport.getLastQuery().set(visitFee.getLastTimestamp());
+            System.out.println("here2");
             break;
         }
 
@@ -107,14 +109,18 @@ public final class WeeklyReportData implements Serializable {
     }
 
     private Instant computeOrigin() {
-        return Instant.now().atOffset(ZoneOffset.UTC).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).truncatedTo(ChronoUnit.DAYS).toInstant().plusMillis(1);
+        return Instant.now().atOffset(ZoneOffset.UTC).with(TemporalAdjusters.previous(DayOfWeek.MONDAY)).truncatedTo(ChronoUnit.DAYS).toInstant().plusMillis(1);
     }
 
     private void setNextMarker() {
-        sendMarker = Instant.now().atOffset(ZoneOffset.UTC).with(TemporalAdjusters.next(DayOfWeek.MONDAY)).truncatedTo(ChronoUnit.DAYS).toInstant().plusMillis(1);
+        sendMarker = Instant.now().atOffset(ZoneOffset.UTC).with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY)).truncatedTo(ChronoUnit.DAYS).toInstant().plusMillis(1);
     }
 
     public Map<Long, PendingWeeklyReport> getReports() {
         return reports;
+    }
+
+    public Instant getSendMarker() {
+        return sendMarker;
     }
 }

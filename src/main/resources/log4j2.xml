@@ -15,7 +15,7 @@
         </RandomAccessFile>
     </Appenders>
     <Loggers>
-        <Root level="INFO">
+        <Root level="DEBUG">
             <AppenderRef ref="outconsole"/>
             <AppenderRef ref="errconsole"/>
             <AppenderRef ref="errfile"/>

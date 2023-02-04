@@ -27,20 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public abstract class ApiDataFetcher<T> extends DataFetcher {
 
-    /*
-     https://business.upland.me/contributions/1065375
-     Shows all spark contributions on a structure, an array of
-        {
-      "id":"e60931b0-a99b-11ec-8c25-edbfc384f5d2",
-      "is_in_jail":false,
-      "pending":false,
-      "avatar_image":"https://static.upland.me/avatars/visitors/_Modern+Sunglasses+1.svg",
-      "avatar_color":"#FFA34D",
-      "price":0.03,
-      "username":"swear2jah",
-      "created_at":"2022-06-30T18:00:46.349Z"
-   },
-     */
+
 
     private static final Logger logger = LogManager.getLogger();
 
@@ -59,11 +46,8 @@ public abstract class ApiDataFetcher<T> extends DataFetcher {
     /**
      * A general purpose {@link Gson} instance.
      */
-    public static final Gson GSON = new GsonBuilder().create();
+    public static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    /**
-     * Services all HTTP requests.
-     */
 
     private volatile CompletableFuture<T> task;
 
@@ -82,26 +66,14 @@ public abstract class ApiDataFetcher<T> extends DataFetcher {
     @Override
     final void handleFetch(String link) {
         try {
-            HttpRequest request;
-            if (link.contains("mine")) {
-                request = HttpRequest.newBuilder()
-                        .uri(URI.create(link))
-                        .headers("authority", "api.upxland.me",
-                                "origin", "https://play.upland.me",
-                                "referer", "https://play.upland.me/",
-                                "authorization", TOKENS.get(0),
-                                "accept", "application/json")
-                        .build();
-            } else {
-                request = HttpRequest.newBuilder()
-                        .uri(URI.create(link))
-                        .headers("authority", "api.upxland.me",
-                                "origin", "https://play.upland.me",
-                                "referer", "https://play.upland.me/",
-                                "authorization", TOKENS.get(0),
-                                "accept", "application/json")
-                        .build();
-            }
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(link))
+                    .headers("authority", "api.upxland.me",
+                            "origin", "https://play.upland.me",
+                            "referer", "https://play.upland.me/",
+                            "authorization", TOKENS.get(0),
+                            "accept", "application/json")
+                    .build();
             logger.debug("API request {}", link);
             task = client.sendAsync(request, BodyHandlers.ofString()).
                     handleAsync((response, throwable) -> {
@@ -121,12 +93,12 @@ public abstract class ApiDataFetcher<T> extends DataFetcher {
                         try {
                             handleResponse(link, body);
                         } catch (Exception e) {
-                           logger.catching(e);
+                            logger.catching(e);
                         }
                         return getResult();
                     });
         } catch (Exception e) {
-           logger.catching(e);
+            logger.catching(e);
         }
     }
 

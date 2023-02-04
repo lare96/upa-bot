@@ -1,5 +1,6 @@
 package me.upa.discord;
 
+import java.time.LocalDate;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -19,7 +20,9 @@ public final class UpaPoolProperty {
 
     private final AtomicBoolean verified = new AtomicBoolean();
 
-    public UpaPoolProperty(long propertyId, String address, String cityName, int mintPrice, int cost, int up2, long donorMemberId) {
+    private final LocalDate listedOn;
+
+    public UpaPoolProperty(long propertyId, String address, String cityName, int mintPrice, int cost, int up2, long donorMemberId, LocalDate listedOn) {
         this.propertyId = propertyId;
         this.address = address;
         this.mintPrice = mintPrice;
@@ -27,6 +30,7 @@ public final class UpaPoolProperty {
         this.up2 = up2;
         this.donorMemberId = donorMemberId;
         this.cityName = cityName;
+        this.listedOn = listedOn;
         descriptiveAddress = address + ", " + cityName;
     }
 
@@ -36,6 +40,10 @@ public final class UpaPoolProperty {
 
     public String getAddress() {
         return address;
+    }
+
+    public String getCityName() {
+        return cityName;
     }
 
     public String getDescriptiveAddress() {
@@ -60,5 +68,9 @@ public final class UpaPoolProperty {
 
     public AtomicBoolean getVerified() {
         return verified;
+    }
+
+    public LocalDate getListedOn() {
+        return listedOn;
     }
 }

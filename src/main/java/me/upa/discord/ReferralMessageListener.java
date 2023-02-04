@@ -1,9 +1,9 @@
 package me.upa.discord;
 
 import com.google.common.primitives.Ints;
-import com.google.common.primitives.Longs;
 import me.upa.UpaBotContext;
-import me.upa.discord.CreditTransaction.CreditTransactionType;
+import me.upa.discord.listener.credit.CreditTransaction;
+import me.upa.discord.listener.credit.CreditTransaction.CreditTransactionType;
 import me.upa.sql.SqlConnectionManager;
 import me.upa.sql.SqlTask;
 import net.dv8tion.jda.api.entities.Member;
@@ -15,7 +15,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.util.Arrays;
 import java.util.List;
 
 public final class ReferralMessageListener extends ListenerAdapter {
@@ -55,7 +54,7 @@ public final class ReferralMessageListener extends ListenerAdapter {
     @Override
     public void onMessageReceived(@NotNull MessageReceivedEvent event) {
         if (event.getAuthor().getIdLong() == 499595256270946326L) {
-            String[] sections = event.getMessage().getContentStripped().split(" ");
+            String[] sections = event.getMessage().getContentRaw().split(" ");
             if (sections.length >= 14) {
                 List<Member> mentions = event.getMessage().getMentions().getMembers();
                 if(mentions.size() < 2) {
@@ -64,10 +63,9 @@ public final class ReferralMessageListener extends ListenerAdapter {
                 }
                 Member invitedBy = mentions.get(1);
                 Long invitedById = invitedBy.getIdLong();
-                Integer invites = Ints.tryParse(sections[11]);
+                Integer invites = Ints.tryParse(sections[11].replace("**", "").trim());
                 UpaMember upaMember = ctx.databaseCaching().getMembers().get(invitedById);
-                logger.warn("{},{},{}", invitedById, invites, upaMember);
-                if (invites != null && upaMember != null) {
+                if (invites != null && upaMember != null && upaMember.getActive().get()) {
                     int storedInvites = upaMember.getReferrals().get();
                     int diff = invites - storedInvites;
                     if (diff > 0) {

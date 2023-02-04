@@ -27,11 +27,13 @@ public class PendingWeeklyReport implements Serializable {
 
     private final AtomicReference<Instant> lastQuery = new AtomicReference<>();
 
+    private final Instant origin;
     public PendingWeeklyReport(String blockchainAccountId, long memberId, String username, Instant lastQuery) {
         this.blockchainAccountId = blockchainAccountId;
         this.memberId = memberId;
         this.username = username;
         this.lastQuery.set(lastQuery);
+        origin = lastQuery;
     }
 
     public MessageEmbed generate(Instant origin) {
@@ -77,5 +79,9 @@ public class PendingWeeklyReport implements Serializable {
 
     public AtomicInteger getPacSpent() {
         return pacSpent;
+    }
+
+    public Instant getOrigin() {
+        return origin;
     }
 }

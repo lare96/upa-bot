@@ -5,7 +5,7 @@ import java.util.List;
 
 public final class PropertyYield {
 
-    private final String propertyId;
+    private final long propertyId;
 
     /**
      * The hours since the last yield was claimed.
@@ -15,13 +15,13 @@ public final class PropertyYield {
 
     private final List<PropertyYieldVisitor> visitors;
 
-    public PropertyYield(String propertyId, Instant lastClaimed, List<PropertyYieldVisitor> visitors) {
+    public PropertyYield(long propertyId, Instant lastClaimed, List<PropertyYieldVisitor> visitors) {
         this.propertyId = propertyId;
         this.lastClaimed = lastClaimed;
         this.visitors = visitors;
     }
 
-    public String getPropertyId() {
+    public long getPropertyId() {
         return propertyId;
     }
 
